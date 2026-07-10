@@ -1,0 +1,38 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+
+# Conda and VS Code configurations
+.conda/
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# ML Models
+Models/
+*.joblib
+*.pkl
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# CAD & Simulation Logs / Temporary Files
+*.log
+*.svf
+*.status
+*.pvs
+*.bak
+
+/Books
