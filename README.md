@@ -1,6 +1,4 @@
-markdown
-
-# Early-Stage Dynamic Power Prediction for Digital ICs using Machine Learning
+### Early-Stage Dynamic Power Prediction for Digital ICs using Machine Learning
 
 This repository contains the source code and datasets for a Bachelor's Graduation Thesis titled: **"Development of software for predicting power consumption in the early stage of design of digital integrated circuits"**.
 
