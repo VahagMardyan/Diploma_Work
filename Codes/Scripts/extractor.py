@@ -1,3 +1,6 @@
+"""
+This code helps to extract a specific row from specific dataset. Available formats: 'csv', 'json' and 'xlsx'.
+"""
 import pandas as pd
 import json
 

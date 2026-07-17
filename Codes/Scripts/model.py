@@ -1,3 +1,7 @@
+"""
+Train the model
+"""
+
 import pandas as pd
 import numpy as np
 import torch
@@ -9,6 +13,72 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import r2_score, mean_absolute_error
 import joblib
+
+# 1. Universal function for feature engineering (applies everywhere)
+def engineer_features(df):
+    df = df.copy() # To avoid damaging the original DataFrame
+    df['v2_freq'] = (df['vdd'] ** 2) * df['clock_frequency_mhz'] # vdd² * f
+
+    log_columns = [
+        'cell_count', 'comb_cell_count', 'seq_cell_count', 
+        'inv_count', 'buf_count', 'nand_count', 'nor_count', 'xor_count', 'mux_count', 'other_count',
+        'total_area', 'num_nets', 'num_inputs', 'num_outputs'
+    ]
+    for col in log_columns:
+        df[f"log_{col}"] = np.log1p(df[col])
+        
+    return df
+
+# 2. Universal function to get feature names
+def get_feature_names():
+    num_features = [
+        # Operational and physical
+        'clock_frequency_mhz', 'toggle_rate', 'static_probability', 'vdd', 'temperature', 'v2_freq',
+        # Logarithmic quantities (dividing elements by type)
+        'log_cell_count', 'log_comb_cell_count', 'log_seq_cell_count',
+        'log_inv_count', 'log_buf_count', 'log_nand_count', 'log_nor_count', 
+        'log_xor_count', 'log_mux_count', 'log_other_count',
+        'log_total_area', 'log_num_nets', 'log_num_inputs', 'log_num_outputs',
+        # Topology, load and signals
+        'avg_cell_area', 'max_fanout', 'avg_fanout', 'avg_fanin',
+        'logic_depth', 'depth_mean', 'depth_std', 'depth_max',
+        'avg_net_toggle', 'toggle_attenuation',
+        # Timing arrows and delay
+        'critical_path_delay', 'wns', 'tns'
+    ]
+    cat_features = ['process', 'pvt_corner']
+    features = num_features + cat_features
+    return features, num_features, cat_features
+
+# 3. Function to get validation data (for evaluate.py)
+def load_and_preprocess_val_data(data_path1="../Datasets/dataset_power.csv", 
+                                 data_path2="../Datasets/dataset_power_alt.csv", 
+                                 preprocessor_path="./Model/preprocessor.joblib"):
+    
+    print("Loading datasets for evaluation...")
+    df1 = pd.read_csv(data_path1)
+    df2 = pd.read_csv(data_path2)
+    df = pd.concat([df1, df2], ignore_index=True)
+
+    df = df[df['cell_count'] > 0]
+    df = df[df['total_power_uW'] >= 0.1]
+
+    y_raw = df['total_power_uW'].values.astype(np.float32)
+    y_log = np.log1p(y_raw)
+
+    df = engineer_features(df)
+    features, _, _ = get_feature_names()
+
+    print("Loading preprocessor...")
+    preprocessor = joblib.load(preprocessor_path)
+    X_processed = preprocessor.transform(df[features]).astype(np.float32)
+    input_dim = X_processed.shape[1]
+
+    _, X_val, _, y_val = train_test_split(
+        X_processed, y_log, test_size=0.2, random_state=42
+    )
+    y_val_true = np.expm1(y_val)
+    return X_val, y_val_true, input_dim
 
 
 # Neural Network Architecture
@@ -46,40 +116,10 @@ def train_model():
     y_raw = df['total_power_uW'].values.astype(np.float32)
     y_log = np.log1p(y_raw)
 
-    df['v2_freq'] = (df['vdd'] ** 2) * df['clock_frequency_mhz'] # vdd² * f
-
-    # We also logarithmize area and cell_count so that the network can easily understand the scale.
-    log_columns = [
-        'cell_count', 'comb_cell_count', 'seq_cell_count', 
-        'inv_count', 'buf_count', 'nand_count', 'nor_count', 'xor_count', 'mux_count', 'other_count',
-        'total_area', 'num_nets', 'num_inputs', 'num_outputs'
-    ]
-
-    for col in log_columns:
-        df[f"log_{col}"] = np.log1p(df[col])
+    df = engineer_features(df)
+    features, num_features, cat_features = get_feature_names()
 
     # 2. Preprocessing
-    num_features = [
-        # Operational and physical
-        'clock_frequency_mhz', 'toggle_rate', 'static_probability', 'vdd', 'temperature', 'v2_freq',
-        # Logarithmic quantities (dividing elements by type)
-        'log_cell_count', 'log_comb_cell_count', 'log_seq_cell_count',
-        'log_inv_count', 'log_buf_count', 'log_nand_count', 'log_nor_count', 
-        'log_xor_count', 'log_mux_count', 'log_other_count',
-        'log_total_area', 'log_num_nets', 'log_num_inputs', 'log_num_outputs',
-        # Topology, load and signals
-        'avg_cell_area', 'max_fanout', 'avg_fanout', 'avg_fanin',
-        'logic_depth', 'depth_mean', 'depth_std', 'depth_max',
-        'avg_net_toggle', 'toggle_attenuation',
-        # Timing arrows and delay
-        'critical_path_delay', 'wns', 'tns'
-    ]
-
-    # We also add pvt_corner as a categorical variable.
-    cat_features = ['process', 'pvt_corner']
-
-    features = num_features + cat_features
-
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', StandardScaler(), num_features),
@@ -160,3 +200,4 @@ def train_model():
 
 if __name__ == "__main__":
     train_model()
+

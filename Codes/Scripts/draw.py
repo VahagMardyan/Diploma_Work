@@ -1,3 +1,6 @@
+"""
+This code visualizes Neural Network.
+"""
 import torch
 from torchview import draw_graph
 from torchinfo import summary

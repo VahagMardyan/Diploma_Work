@@ -1,3 +1,6 @@
+"""
+The main code...
+"""
 import os
 import json
 import joblib
@@ -5,8 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-
-from model import PowerNet
+from model import PowerNet, engineer_features, get_feature_names
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -45,33 +47,11 @@ def main():
 
     print(f"{len(df_new)} rows data read successfully!\n")
 
-    # Feature Engineering
-    df_new['v2_freq'] = (df_new['vdd'] ** 2) * df_new['clock_frequency_mhz']
-
-    log_columns = [
-        'cell_count', 'comb_cell_count', 'seq_cell_count', 
-        'inv_count', 'buf_count', 'nand_count', 'nor_count', 'xor_count', 'mux_count', 'other_count',
-        'total_area', 'num_nets', 'num_inputs', 'num_outputs'
-    ]
-    for col in log_columns:
-        df_new[f"log_{col}"] = np.log1p(df_new[col])
-
-    num_features = [
-        'clock_frequency_mhz', 'toggle_rate', 'static_probability', 'vdd', 'temperature', 'v2_freq',
-        'log_cell_count', 'log_comb_cell_count', 'log_seq_cell_count',
-        'log_inv_count', 'log_buf_count', 'log_nand_count', 'log_nor_count', 
-        'log_xor_count', 'log_mux_count', 'log_other_count',
-        'log_total_area', 'log_num_nets', 'log_num_inputs', 'log_num_outputs',
-        'avg_cell_area', 'max_fanout', 'avg_fanout', 'avg_fanin',
-        'logic_depth', 'depth_mean', 'depth_std', 'depth_max',
-        'avg_net_toggle', 'toggle_attenuation',
-        'critical_path_delay', 'wns', 'tns'
-    ]
-    cat_features = ['process', 'pvt_corner']
-    features = num_features + cat_features
+    # Feature Engineering (Կիրառում ենք 1 տողով՝ 30 տողի փոխարեն)
+    df_new = engineer_features(df_new)
+    features, _, _ = get_feature_names()
 
     # 3. Data Scaling (Preprocessing)
-    
     X_processed = preprocessor.transform(df_new[features])
     
     # 4. Loading the PyTorch model
@@ -107,3 +87,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

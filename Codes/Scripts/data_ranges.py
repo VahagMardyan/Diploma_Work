@@ -1,3 +1,6 @@
+"""
+This code shows the range of permissible parameter values: [min; max]
+"""
 import pandas as pd
 
 file_path1 = "dataset_power_alt.csv"
