@@ -1,9 +1,9 @@
 import pandas as pd
 import json
 
-df = pd.read_csv('../Datasets/dataset_power.csv')
+df = pd.read_csv('../../Verilog/Test/dataset_power_test.csv')
 
-user_input_index = 17 # real csv index - 2
+user_input_index = 2400 # real csv index - 2
 
 row_data = df.iloc[user_input_index - 2]
 
@@ -19,8 +19,17 @@ required_features = [
 
 subset = row_data[required_features]
 
-FILE_PATH = "./Test/test.json"
-with open(FILE_PATH, 'w', encoding='utf-8') as f:
-    json.dump(subset.to_dict(), f, indent=4)
+FILE_PATH = "./Test/test.xlsx"
 
-print(f"{user_input_index}-th row saved successfully to {FILE_PATH}!")
+if FILE_PATH.endswith('.csv'):
+    pd.DataFrame([subset]).to_csv(FILE_PATH, index=False)
+elif FILE_PATH.endswith('.xlsx'):
+    pd.DataFrame([subset]).to_excel(FILE_PATH, index=False)
+elif FILE_PATH.endswith('.json'):
+    with open(FILE_PATH, 'w', encoding='utf-8') as f:
+        json.dump(subset.to_dict(), f, indent=4)
+else:
+    raise ValueError(f"Error: Wrong format in '{FILE_PATH}'. Only `.json`, `.csv` or `xlsx` are allowed.")
+
+print(f"{user_input_index}-th row saved successfully to {FILE_PATH}.")
+

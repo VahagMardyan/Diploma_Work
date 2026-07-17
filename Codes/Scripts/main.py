@@ -37,15 +37,15 @@ def main():
         df_new = pd.DataFrame(data)
     elif input_path.endswith('.csv'):
         df_new = pd.read_csv(input_path)
+    elif input_path.endswith('xlsx'):
+        df_new = pd.read_excel(input_path)
     else:
-        print("Error: File format must be .json or .csv")
+        print("Error: File format must be `.json`, `.csv` or `xlsx`.")
         return
 
     print(f"{len(df_new)} rows data read successfully!\n")
 
-    # ------------------------------------------------------------------
     # Feature Engineering
-    # ------------------------------------------------------------------
     df_new['v2_freq'] = (df_new['vdd'] ** 2) * df_new['clock_frequency_mhz']
 
     log_columns = [
@@ -69,7 +69,6 @@ def main():
     ]
     cat_features = ['process', 'pvt_corner']
     features = num_features + cat_features
-    # ------------------------------------------------------------------
 
     # 3. Data Scaling (Preprocessing)
     
