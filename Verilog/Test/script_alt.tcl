@@ -7,7 +7,7 @@ if {![info exists src_dir]} {
     set src_dir [pwd]
 }
 
-set out_file        "dataset_power_test_alt_.csv"
+set out_file        "dataset_power_test_alt.csv"
 set error_log       "synthesis_errors_test_alt.log"
 set checkpoint_file "completed_combos_test_alt.log"
 

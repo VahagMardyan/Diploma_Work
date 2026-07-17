@@ -1,9 +1,9 @@
 import pandas as pd
 import json
 
-df = pd.read_csv('../../Verilog/Test/dataset_power_test.csv')
+df = pd.read_csv('../../Verilog/Test/dataset_power_test_alt.csv')
 
-user_input_index = 2400 # real csv index - 2
+user_input_index = 1395 # real csv index - 2
 
 row_data = df.iloc[user_input_index - 2]
 
@@ -19,7 +19,7 @@ required_features = [
 
 subset = row_data[required_features]
 
-FILE_PATH = "./Test/test.xlsx"
+FILE_PATH = "./Test/test.json"
 
 if FILE_PATH.endswith('.csv'):
     pd.DataFrame([subset]).to_csv(FILE_PATH, index=False)

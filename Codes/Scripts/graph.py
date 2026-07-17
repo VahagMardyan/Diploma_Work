@@ -3,24 +3,22 @@ import numpy as np
 import torch
 import joblib
 import matplotlib.pyplot as plt
-
-# Մաքուր import առանց մարզումը նորից ակտիվացնելու
 from model import PowerNet
 
 def main():
     print("=== Visualizing Predictions (Real vs Predicted) ===")
     
-    # 1. Բեռնում ենք անհրաժեշտ ֆայլերը
+    # 1. Loading the necessary files.
     df = pd.read_csv('../Datasets/dataset_power_alt.csv')
     preprocessor = joblib.load('./Model/preprocessor.joblib')
     model_path = "./Model/power_predictor_model.pth"
     
-    # 2. Ֆիլտրում ենք տվյալները (ինչպես model.py-ում է)
+    # 2. Filtering data
     df = df[df['cell_count'] > 0]
     df = df[df['total_power_uW'] >= 0.1]
     
-    # 3. Դինամիկ կերպով որոշում ենք input_dim-ը preprocessor-ի միջոցով
-    # Դրա համար վերցնում ենք մեկ տող, կատարում feature engineering և transform
+    # 3. Dynamically determine input_dim using preprocessor
+    # To do this, we take one row, perform feature engineering and transform
     sample_row = df.iloc[[0]].copy()
     
     sample_row['v2_freq'] = (sample_row['vdd'] ** 2) * sample_row['clock_frequency_mhz']
@@ -46,18 +44,18 @@ def main():
     cat_features = ['process', 'pvt_corner']
     features = num_features + cat_features
     
-    # Ստանում ենք իրական չափը
+    # We get the actual size
     sample_processed = preprocessor.transform(sample_row[features])
     input_dim = sample_processed.shape[1]
     print(f"Detected Model Input Dimension: {input_dim}")
     
-    # 4. Բեռնում ենք PyTorch մոդելը
+    # 4. Loading the PyTorch model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = PowerNet(input_dim).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     
-    # 5. Ընտրում ենք ցուցադրական տողեր տարբեր տիրույթներից (ինդեքսներ)
+    # 5. Selecting display rows from different domains (indexes)
     sample_indices = [250, 1500, 5000]
     results = []
     
@@ -69,12 +67,12 @@ def main():
         row = df.iloc[[idx]].copy()
         real_power = row['total_power_uW'].values[0]
         
-        # Feature Engineering տվյալ տողի համար
+        # Feature Engineering for a given line
         row['v2_freq'] = (row['vdd'] ** 2) * row['clock_frequency_mhz']
         for col in log_columns:
             row[f"log_{col}"] = np.log1p(row[col])
             
-        # Տրանսֆորմացիա և Կանխատեսում (Inference)
+        # Transformation and Inference
         X_row = preprocessor.transform(row[features]).astype(np.float32)
         X_tensor = torch.tensor(X_row).to(device)
         
@@ -89,7 +87,7 @@ def main():
         })
         print(f"Sample {idx} -> Real: {real_power:.4f} uW | Pred: {pred_power:.4f} uW")
         
-    # 6. Կառուցում ենք գրաֆիկը
+    # 6. Building the graph
     plot_df = pd.DataFrame(results)
     
     plt.figure(figsize=(9, 6))
@@ -105,7 +103,7 @@ def main():
     plt.legend(fontsize=11)
     plt.grid(axis='y', linestyle='--', alpha=0.5)
     
-    # Արժեքները սյուների վրա գրելու համար
+    # To write values ​​to columns
     for i, row in plot_df.iterrows():
         plt.text(i - width/2, row['Real Power'] + 1, f"{row['Real Power']:.1f}", ha='center', va='bottom', fontsize=9)
         plt.text(i + width/2, row['Predicted Power'] + 1, f"{row['Predicted Power']:.1f}", ha='center', va='bottom', fontsize=9)
