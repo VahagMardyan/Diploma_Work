@@ -1,0 +1,25 @@
+Old -> 12*10*16=1920 rows
+New -> 12*8*25=2400rows
+
+Part1 -> 12 -> 23040 / 28800 (old/new)
+Part 1.1 -> 4 -> 7680 / 9600 rows (old/new)
+Part 1.2 -> 4 -> 7680 / 9600 rows (old/new)
+Part 1.3 -> 4 -> 7680 / 9600 rows (old/new)
+
+Part2 -> 19 -> 36480 / 45600 (old/new)
+Part2.1 -> 10 -> 19200 / 24000 rows (old/new)
+Part2.2 -> 4 -> 7680 / 9600 rows (old/new)
+Part2.3 -> 5 -> 9600 / 12000 rows (old/new)
+
+Part3 -> 23 -> 44160 / 55200 (old/new)
+Part3.1 -> 4 -> 7680 / 9600 rows (old/new)
+Part3.2 -> 15 -> 28800 / 36000 rows (old/new)
+Part3.3 -> 4 -> 7680 / 9600 rows (old/new)
+
+Part4 -> 10 -> 19200 / 24000 (old/new) 
+Սա փոքր մասերի չէի բաժանել
+
+Total: 23040+36480+44160+19200=122880 (old)
+Total: 28800+45600+55200+24000=153600 (new)
+
+Total Dataset: 122800+153600=276480 rows

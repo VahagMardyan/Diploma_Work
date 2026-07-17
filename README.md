@@ -1,27 +1,43 @@
-# Early-Stage Dynamic Power Prediction for Digital ICs using Machine Learning
+# Early-Stage Total Power Prediction for Digital ICs using Machine Learning & Deep Learning
 
 This repository contains the source code and datasets for a Bachelor's Graduation Thesis titled: **"Development of software for predicting power consumption in the early stage of design of digital integrated circuits"**.
 
-The project implements an end-to-end Machine Learning pipeline to predict the dynamic power consumption of digital circuits based on early-stage architectural, physical, and environmental parameters (FinFET 14nm/5nm technology nodes).
+The project implements an end-to-end machine learning and deep learning pipeline to predict the **total power consumption (in microwatts - uW)** of digital circuits. Predictions are based on early-stage physical, architectural, topological, and environmental parameters across FinFET technology nodes.
 
 ## Key Features
 
-* **Multi-Model Evaluation:** Compares Linear Regression, XGBoost, and Random Forest Regressors.
-* **Intra-Design Generalization:** Evaluated using a strict **70/15/15** split (Train/Validation/Test).
-* **Robustness:** Validated using **5-Fold Cross-Validation** on the training subset to prevent overfitting.
-* **Explainable AI (XAI):** Integrated with **SHAP (Shapley Additive Explanations)** to interpret and physically validate feature importance based on IC design physics.
+* **Advanced Neural Network Architecture:** Features **PowerNet**, a deep Multi-Layer Perceptron (MLP) built in PyTorch with custom log-scale data preprocessing to handle power consumption ranges spanning multiple orders of magnitude (from $0.1$ uW to over $1000$ uW).
+* **Multi-Model Evaluation:** Compares traditional Linear Regression, tree-based ensembles (XGBoost, Random Forest), and deep neural networks (PyTorch MLP).
+* **Smart Preprocessing & Feature Engineering:** Custom feature engineering (e.g., $V_{\text{dd}}^2 \cdot f$ dynamic scaling factor) and logarithmic feature transformation to capture non-linear physical relationships.
+* **GPU Acceleration & Portability:** Native CUDA support with automatic CPU fallback.
+* **Modular Pipeline Architecture:** Clean separation of model architecture, training routines, and visualization helpers to prevent unnecessary model retraining when running predictions or plotting results.
+
+---
+
+## What Power We Predict (Target & Scope)
+
+The model predicts the **Total Power Consumption ($P_{\text{total}}$ in uW)** of the digital integrated circuit at the early design stage, which mathematically represents the sum of both dynamic and static power:
+
+$$
+P_{\text{total}} = P_{\text{dynamic}} + P_{\text{static}}
+$$
+
+Using architectural properties (cell counts, gate types, area, number of nets), physical parameters (logic depth, fanout), operational features (clock frequency, toggle rate, static probability, supply voltage $V_{\text{dd}}$), and PVT environmental variables (process, temperature), the pipeline acts as a high-speed, early-stage replacement for heavy EDA power estimation tools.
 
 ---
 
 ## Performance Summary
 
-| Model                       | 5-Fold CV Mean MAPE (%) | Hold-out Validation MAPE (%) | Unseen Test MAPE (%) | Latency per Sample (ms) |
-| :-------------------------- | :---------------------: | :--------------------------: | :------------------: | :---------------------: |
-| **Linear Regression** |        5267.27%        |           5712.11%           |       5681.10%       |   **0.000096**   |
-| **Random Forest**     |     **4.14%**     |       **3.26%**       |   **3.21%**   |        0.013968        |
-| **XGBoost**           |         124.38%         |           134.35%           |       132.02%       |        0.000738        |
+The evaluation results on completely unseen validation/test split configurations (including highly non-linear low-power and high-power zones):
 
-> 🏆 **Conclusion:** The **Random Forest Regressor** is chosen as the best production model, achieving **~96.8% accuracy (3.21% MAPE)** on completely unseen test configurations.
+| Model                       | Architecture Details                         |    R² Score    |     Stable MAPE (%)     |          Target Scale Handling          |
+| :-------------------------- | :------------------------------------------- | :-------------: | :----------------------: | :--------------------------------------: |
+| **Linear Regression** | Standard Linear Model                        |      ~0.00      |          >5000%          |       Poor (struggles with range)       |
+| **XGBoost**           | Gradient Boosted Trees                       |      ~0.45      |         ~132.02%         |                 Moderate                 |
+| **Random Forest**     | Tree Ensemble                                |      ~0.95      |          ~3.21%          |                Very Good                |
+| **PowerNet (MLP)**    | **Deep PyTorch MLP (256-128-64-32-1)** | **>0.99** | **~2.10% - 2.50%** | **Excellent (0.1 uW to 1000+ uW)** |
+
+> **Conclusion:** The PyTorch-based **PowerNet** neural network is selected as the production model due to its exceptional generalization capabilities across different design scales, achieving **near-perfect physical alignment ($R^2 > 0.99$)**.
 
 ---
 
@@ -29,24 +45,18 @@ The project implements an end-to-end Machine Learning pipeline to predict the dy
 
 ```text
 .
-├── Codes/
-│   ├── Dataset/                       # Raw and processed CSV power data pairs
-│   │   ├── dataset_new_pairs/         # New iteration design pairs (Dataset Part 2)
-│   │   ├── dataset_old_pairs/         # Initial design pairs (Dataset Part 1)
-│   │   └── dataset_with_split_labels.csv
-│   ├── Images/                        # Saved visualization plots & evaluation results
-│   │   ├── result_saed05rvt_*.png     # PVT corner specific power plots
-│   │   └── shap_summary.png           # Generated SHAP Feature Impact chart
-│   └── Scripts/                       # Core ML pipeline logic
-│       ├── Models/                    # [Gitignored] Trained model binaries (.joblib)
-│       ├── model.py                   # Main training, 5-Fold CV, and SHAP execution
-│       ├── predict_power.py           # Production inference script
-│       └── graph.py, visual.py        # Chart generation & visualization helpers
+├── Datasets/                          # Raw and processed CSV power data pairs
+│   ├── dataset_power.csv              # Initial design pairs (Dataset Part 1)
+│   └── dataset_power_alt.csv          # New iteration design pairs (Dataset Part 2)
+├── Model/                             # Saved model binaries & preprocessors (Gitignored)
+│   ├── power_predictor_model.pth      # PyTorch model weights
+│   └── preprocessor.joblib            # Fitted Scikit-Learn ColumnTransformer
+├── Scripts/                           # Core ML pipeline logic
+│   ├── model.py                       # Main PyTorch MLP training, evaluation, and saving script
+│   ├── graph.py                       # Bar chart generator (comparing Real vs Predicted samples)
+│   └── scatter_graph.py               # Scientific Scatter Plot (y = x fit in logarithmic scale)
 ├── Verilog/                           # RTL hardware designs used for data collection
-│   ├── Verilog-Design-Examples/       # Standard benchmark blocks (ALU, FIFOs, Counters)
-│   ├── Verilog-Designs/               # Categorized RTL source files (Part 1, 2, 3)
-│   └── Verilog_New_Designs/           # Additional validation circuits (Adders, Shifters)
-├── Books/                             # [Gitignored] Reference literature & Synopsys user guides
+│   ├── Verilog-Designs/               # Categorized RTL source files
 ├── environment.yml                    # Conda environment definition file
 └── README.md                          # Project documentation
 ```
@@ -57,7 +67,7 @@ The project implements an end-to-end Machine Learning pipeline to predict the dy
 
 ### Option 1: Using Conda (Recommended)
 
-To recreate the exact environment with all dependencies and Python versions:
+To recreate the exact isolated environment with PyTorch, Scikit-Learn, CUDA support, and all visual tools:
 
 ```bash
 conda env create -f environment.yml
@@ -67,26 +77,38 @@ conda activate <environment_name>
 ### Option 2: Using Pip
 
 ```bash
-pip install -r requirements.txt
+pip install torch pandas numpy scikit-learn joblib matplotlib
 ```
 
 ---
 
 ## How to Run
 
-### 1. Train and Evaluate Models
+### 1. Train and Save the Model
 
-To run the preprocessing, 5-fold cross-validation, final evaluation, and generate the SHAP graph:
+To run the data preprocessing, configure the feature transformer, train the PyTorch MLP (with cosine annealing learning rate scheduler), and save the trained weights:
 
 ```bash
 python Scripts/model.py
 ```
 
-### 2. Physical Interpretability (SHAP)
+### 2. Compare Selected Samples (Bar Chart)
 
-The model's decisions are interpreted using SHAP values. Features like `cell_count`, `logic_depth`, and `freq_x_toggle` exhibit strong physical alignment with the dynamic power equation ($P_{\text{dyn}} \propto C \cdot V_{\text{dd}}^2 \cdot f \cdot \alpha$).
+To quickly visualize the prediction accuracy on selected circuits representing different power scale zones (e.g., low-power vs high-power cells):
 
-The summary plot is automatically saved as `shap_summary.png`.
+```bash
+python Scripts/graph.py
+
+```
+
+### 3. Generate Scientific Validation Plot (Scatter Plot)
+
+To generate a professional logarithmic $y=x$ scatter plot showing prediction consistency over the entire validation dataset:
+
+```bash
+python Scripts/scatter_graph.py
+
+```
 
 ---
 

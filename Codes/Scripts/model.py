@@ -1,146 +1,162 @@
 import pandas as pd
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.metrics import r2_score, mean_absolute_error
 import joblib
-import time
-import os
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
-from xgboost import XGBRegressor
-from sklearn.model_selection import train_test_split, cross_validate
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, r2_score
-import matplotlib.pyplot as plt
-import shap
 
-os.makedirs("./Models", exist_ok=True)
-print("PART 0: Data Loading and Preprocessing...")
 
-try:
-    df_1 = pd.read_csv("../Dataset/dataset_old_pairs/dataset_power_1.csv")
-    df_2 = pd.read_csv("../Dataset/dataset_new_pairs/dataset_power_2.csv")
-except FileNotFoundError:
-    df_1 = pd.read_csv("dataset_power_1.csv")
-    df_2 = pd.read_csv("dataset_power_2.csv")
+# Neural Network Architecture
+class PowerNet(nn.Module):
+    def __init__(self, input_dim):
+        super(PowerNet, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.08), 
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+    def forward(self, x):
+        return self.net(x)
 
-df = pd.concat([df_1, df_2], ignore_index=True)
+def train_model():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    # 1. Loading data
+    print("Loading datasets...")
+    df1 = pd.read_csv("../Datasets/dataset_power.csv")
+    df2 = pd.read_csv("../Datasets/dataset_power_alt.csv")
+    df = pd.concat([df1, df2], ignore_index=True)
 
-redundant_designs = ['full_half_add_1bit', 'mux_condt']
-df = df[~df['design_name'].isin(redundant_designs)]
+    df = df[df['cell_count'] > 0]
+    df = df[df['total_power_uW'] >= 0.1]
 
-def normalize_to_uw(row):
-    unit = str(row['power_units']).split("/")[0].strip()
-    val = row['dynamic_power']
-    match unit:
-        case 'mW' : return val * 1000.0
-        case 'uW' : return val
-        case 'nW' : return val / 1000.0
-        case 'pW' : return val / 1000000.0
-    return val
+    # We apply log-scale to both Target and large features.
+    y_raw = df['total_power_uW'].values.astype(np.float32)
+    y_log = np.log1p(y_raw)
 
-df['target_power_uW'] = df.apply(normalize_to_uw, axis=1)
+    df['v2_freq'] = (df['vdd'] ** 2) * df['clock_frequency_mhz'] # vdd² * f
 
-df['vdd_squared'] = df['vdd'] ** 2
-df['freq_x_toggle'] = df['clock_frequency_mhz'] * df['toggle_rate']
+    # We also logarithmize area and cell_count so that the network can easily understand the scale.
+    log_columns = [
+        'cell_count', 'comb_cell_count', 'seq_cell_count', 
+        'inv_count', 'buf_count', 'nand_count', 'nor_count', 'xor_count', 'mux_count', 'other_count',
+        'total_area', 'num_nets', 'num_inputs', 'num_outputs'
+    ]
 
-df_encoded = pd.get_dummies(df, columns=['process'], drop_first=True, dtype=int)
+    for col in log_columns:
+        df[f"log_{col}"] = np.log1p(df[col])
 
-features = [
-    'clock_frequency_mhz', 'toggle_rate', 'static_probability', 
-    'cell_count', 'seq_cell_count', 'total_area', 'logic_depth', 
-    'vdd', 'temperature', 'vdd_squared', 'freq_x_toggle'
-]
-process_cols = [col for col in df_encoded.columns if 'process' in col]
-features.extend(process_cols)
+    # 2. Preprocessing
+    num_features = [
+        # Operational and physical
+        'clock_frequency_mhz', 'toggle_rate', 'static_probability', 'vdd', 'temperature', 'v2_freq',
+        # Logarithmic quantities (dividing elements by type)
+        'log_cell_count', 'log_comb_cell_count', 'log_seq_cell_count',
+        'log_inv_count', 'log_buf_count', 'log_nand_count', 'log_nor_count', 
+        'log_xor_count', 'log_mux_count', 'log_other_count',
+        'log_total_area', 'log_num_nets', 'log_num_inputs', 'log_num_outputs',
+        # Topology, load and signals
+        'avg_cell_area', 'max_fanout', 'avg_fanout', 'avg_fanin',
+        'logic_depth', 'depth_mean', 'depth_std', 'depth_max',
+        'avg_net_toggle', 'toggle_attenuation',
+        # Timing arrows and delay
+        'critical_path_delay', 'wns', 'tns'
+    ]
 
-x = df_encoded[features]
-y = df_encoded['target_power_uW']
+    # We also add pvt_corner as a categorical variable.
+    cat_features = ['process', 'pvt_corner']
 
-X_train, X_temp, y_train, y_temp = train_test_split(x, y, test_size=0.30, random_state=42)
-X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.50, random_state=42)
+    features = num_features + cat_features
 
-print("\n--- Data Distribution Image ---")
-print(f"Train (for Training & 5-Fold CV): {X_train.shape[0]} row (70%)")
-print(f"Validation (Hold-out Validation):  {X_val.shape[0]} row (15%)")
-print(f"Test (Unseen Final Test):         {X_test.shape[0]} row (15%)")
-print("--------------------------------\n")
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), num_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), cat_features)
+        ])
 
-models = {
-    "Linear Regression" : LinearRegression(),
-    "Random Forest" : RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1),
-    "XGBoost" : XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42, n_jobs=-1)
-}
+    X_processed = preprocessor.fit_transform(df[features]).astype(np.float32)
+    input_dim = X_processed.shape[1]
+    print(f"New Input Dimension (Features count): {input_dim}")
 
-trained_models = {}
-cv_results = {}
-val_results = {}
-test_results = {}
+    # 3. Train/Val Split
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_processed, y_log, test_size=0.2, random_state=42
+    )
+    y_val_true = np.expm1(y_val) 
 
-for name, model in models.items():
-    print(f"--- Processing {name} ---")
-    
-    print(f"Running 5-Fold CV on Train set...")
-    scoring = {
-        'mae': 'neg_mean_absolute_error',
-        'mape': 'neg_mean_absolute_percentage_error',
-        'r2': 'r2'
-    }
-    cv_scores = cross_validate(model, X_train, y_train, cv=5, scoring=scoring, n_jobs=-1)
-    
-    cv_results[name] = {
-        "CV Mean MAE (uW)": round(-np.mean(cv_scores['test_mae']), 4),
-        "CV Mean MAPE (%)": round(-np.mean(cv_scores['test_mape']) * 100, 4),
-        "CV Mean R²": round(np.mean(cv_scores['test_r2']), 4)
-    }
-    
-    print(f"Training final {name} model...")
-    model.fit(X_train, y_train)
-    trained_models[name] = model
+    train_dataset = TensorDataset(torch.tensor(X_train), torch.tensor(y_train).unsqueeze(1))
+    train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=True)
 
-    y_val_pred = model.predict(X_val)
-    val_results[name] = {
-        "MAE (uW)" : round(mean_absolute_error(y_val, y_val_pred), 4),
-        "MAPE (%)": round(mean_absolute_percentage_error(y_val, y_val_pred) * 100, 4),
-        "R² Score" : round(r2_score(y_val, y_val_pred), 4)
-    }
+    model = PowerNet(input_dim).to(device)
+    criterion = nn.MSELoss()
 
-    start_time = time.time()
-    y_test_pred = model.predict(X_test)
-    elapsed_time = (time.time() - start_time) / len(X_test) * 1000
-    
-    test_results[name] = {
-        "MAE (uW)": round(mean_absolute_error(y_test, y_test_pred), 4),
-        "MAPE (%)": round(mean_absolute_percentage_error(y_test, y_test_pred) * 100, 4),
-        "R² Score": round(r2_score(y_test, y_test_pred), 4),
-        "Latency per Sample (ms)": round(elapsed_time, 6)
-    }
+    optimizer = optim.AdamW(model.parameters(), lr=0.003, weight_decay=1e-4)
 
-print("\nPART 1: 5-Fold Cross-Validation Results (Train Set Sub-folds)")
-print(pd.DataFrame(cv_results).T)
+    EPOCHS = 60
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
-print("\nPART 2: Validation Set Results (15% Hold-out Check)")
-print(pd.DataFrame(val_results).T)
+    # 5. Training
+    print(f"\nTraining Neural Network ({EPOCHS} Epochs with Scheduler)...")
+    model.train()
+    for epoch in range(EPOCHS):
+        epoch_loss = 0
+        for batch_X, batch_y in train_loader:
+            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
 
-print("\nPART 3: Generalization Test Results (15% Unseen Test Data)")
-print(pd.DataFrame(test_results).T)
+            optimizer.zero_grad()
+            outputs = model(batch_X)
+            loss = criterion(outputs, batch_y)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
 
-best_model_name = "Random Forest"
-best_model = trained_models[best_model_name]
-model_filename = "./Models/power_predictor.joblib"
+        scheduler.step() 
 
-joblib.dump(best_model, model_filename)
-print(f"\nThe best model ({best_model_name}) was successfully saved to `{model_filename}`")
+        if (epoch + 1) % 5 == 0 or epoch == 0:
+            print(f"Epoch {epoch+1}/{EPOCHS} - Loss: {epoch_loss/len(train_loader):.5f} - LR: {scheduler.get_last_lr()[0]:.5f}")
 
-print("\nPART 4: SHAP (Shapley's Additive Explanations)")
-print("Calculating SHAP values for Random Forest...")
-explainer = shap.TreeExplainer(best_model)
+    # 6. Rating
+    model.eval()
+    with torch.no_grad():
+        X_val_tensor = torch.tensor(X_val).to(device)
+        preds_log = model(X_val_tensor).cpu().numpy().flatten()
 
-X_shap_sample = X_test.sample(n=min(200, len(X_test)), random_state=42)
-shap_values = explainer.shap_values(X_shap_sample)
+    preds_uW = np.expm1(preds_log)
+    preds_uW = np.clip(preds_uW, 0.01, None)
 
-SHAP_SUMMARY = "../Images/shap_summary.png"
-plt.figure(figsize=(10, 6))
-shap.summary_plot(shap_values, X_shap_sample, show=False)
-plt.title("SHAP Feature Impact on Dynamic Power Prediction", fontsize=14)
-plt.tight_layout()
-plt.savefig(SHAP_SUMMARY, dpi=300)
-print(f"SHAP graph successfully saved as `{SHAP_SUMMARY}`.")
+    mae = mean_absolute_error(y_val_true, preds_uW)
+    r2 = r2_score(y_val_true, preds_uW)
 
+    mask = y_val_true > 0.1
+    mape_stable = np.mean(np.abs((y_val_true[mask] - preds_uW[mask]) / y_val_true[mask])) * 100
+
+    WEIGHT_PATH = "./Model/power_predictor_model.pth"
+
+    torch.save(model.state_dict(), f'{WEIGHT_PATH}')
+    print(f"Model weights saved to '{WEIGHT_PATH}'")
+
+    PREPROCESSOR_PATH = "./Model/preprocessor.joblib"
+    joblib.dump(preprocessor, f'{PREPROCESSOR_PATH}')
+    print(f"Preprocessor saved to '{PREPROCESSOR_PATH}'")
+
+    print("\n" + "="*50)
+    print("UPDATED EVALUATION RESULTS (Non-Log Scale uW):")
+    print(f"MAE:        {mae:.4f} uW")
+    print(f"R2 Score:   {r2:.4f}")
+    print(f"Stable MAPE: {mape_stable:.2f}%")
+    print("="*50)
+
+if __name__ == "__main__":
+    train_model()
