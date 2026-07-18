@@ -4,9 +4,12 @@ This code helps to extract a specific row from specific dataset. Available forma
 import pandas as pd
 import json
 
-df = pd.read_csv('../../Verilog/Test/dataset_power_test_alt.csv')
+df = pd.read_csv('../../Verilog/Test/dataset_power_test.csv')
 
-user_input_index = 1395 # real csv index - 2
+user_input_index = int(input("Index: ")) # real csv index - 2
+
+if user_input_index > len(df):
+    raise ValueError(f"Index should be less or equal than {len(df)}")
 
 row_data = df.iloc[user_input_index - 2]
 
@@ -22,7 +25,7 @@ required_features = [
 
 subset = row_data[required_features]
 
-FILE_PATH = "./Test/test.json"
+FILE_PATH = "./Test/testing.json"
 
 if FILE_PATH.endswith('.csv'):
     pd.DataFrame([subset]).to_csv(FILE_PATH, index=False)

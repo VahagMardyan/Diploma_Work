@@ -1,5 +1,5 @@
 """
-The main code...
+The main code (CLI)...
 """
 import os
 import json
@@ -8,7 +8,17 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from model import PowerNet, engineer_features, get_feature_names
+from model import PowerNet, engineer_features, get_feature_names, TARGET_CONFIGS
+
+def load_model(model_path, input_dim, device):
+    model = PowerNet(input_dim).to(device)
+    state_dict = torch.load(model_path, map_location=device)
+    if isinstance(state_dict, nn.Module):
+        model = state_dict.to(device)
+    else:
+        model.load_state_dict(state_dict)
+    model.eval()
+    return model
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -16,16 +26,16 @@ def main():
     print("=== Digital IC Power Prediction (Inference) ===")
     
     input_path = input("Input file path: ")
-    # output_path = "predictions_output.json"
     preprocessor_path = "./Model/preprocessor.joblib"
-    model_path = "./Model/power_predictor_model.pth"
+    model_paths = {target: path for target, path in TARGET_CONFIGS.items()}
     
     print(f"Input file path is: {input_path}\n")
-    print(f"Loading '{preprocessor_path}' and '{model_path}'...")
+    print(f"Loading '{preprocessor_path}' and {len(model_paths)} model(s)...")
     
-    # 1. Loading Preprocessor
-    if not os.path.exists(preprocessor_path) or not os.path.exists(model_path):
-        print("Error: Model or preprocessor files are missing.")
+    # 1. Loading Preprocessor and checking model files
+    missing = [p for p in [preprocessor_path, *model_paths.values()] if not os.path.exists(p)]
+    if missing:
+        print(f"Error: The following file(s) are missing: {', '.join(missing)}")
         return
         
     preprocessor = joblib.load(preprocessor_path)
@@ -51,40 +61,34 @@ def main():
     df_new = engineer_features(df_new)
     features, _, _ = get_feature_names()
 
-    # 3. Data Scaling (Preprocessing)
+    # 3. Data Scaling (Preprocessing) -- shared across all targets
     X_processed = preprocessor.transform(df_new[features])
-    
-    # 4. Loading the PyTorch model
     input_dim = X_processed.shape[1]
-    model = PowerNet(input_dim).to(device)
-    
-    state_dict = torch.load(model_path, map_location=device)
-    if isinstance(state_dict, nn.Module):
-        model = state_dict
-    else:
-        model.load_state_dict(state_dict)
-        
-    model.eval()
-
-    # 5. Inference
     X_tensor = torch.tensor(X_processed, dtype=torch.float32).to(device)
-    with torch.no_grad():
-        preds_log = model(X_tensor).cpu().numpy().flatten()
-        
-    predicted_power = np.expm1(preds_log)
-    
-    df_new['predicted_power_uW'] = predicted_power
-    
-    # 6. Saving results
-    # output_data = df_new.to_dict(orient='records')
-    # with open(output_path, 'w', encoding='utf-8') as f:
-    #     json.dump(output_data, f, indent=4)
-        
-    # print(f"Prediction is over. The results were saved in '{output_path}':")
-    print(f"Prediction is Over. ")
-    for idx, val in enumerate(predicted_power):
-        print(f"Row {idx+1} Predicted Power: {val:.4f} uW")
+
+    # 4. Loading each model and predicting its target
+    df_new = df_new.reset_index(drop=True)
+    predictions = {}
+    for target_column, model_path in model_paths.items():
+        model = load_model(model_path, input_dim, device)
+        with torch.no_grad():
+            preds_log = model(X_tensor).cpu().numpy().flatten()
+        predicted_values = np.expm1(preds_log)
+        predictions[target_column] = predicted_values
+        df_new[f'predicted_{target_column}'] = predicted_values
+
+    # total_power_uW is derived, not modeled: it equals
+    # dynamic_power_uW + leakage_power_uW exactly in the data, so we sum
+    # the two predictions instead of training a third model for it.
+    predictions['total_power_uW'] = predictions['dynamic_power_uW'] + predictions['leakage_power_uW']
+    df_new['predicted_total_power_uW'] = predictions['total_power_uW']
+
+    # 5. Printing results
+    print("Prediction is Over.\n")
+    print_order = ['total_power_uW', 'dynamic_power_uW', 'leakage_power_uW']
+    for idx in range(len(df_new)):
+        parts = [f"{target}: {predictions[target][idx]:.4f} uW" for target in print_order]
+        print(f"Row {idx+1} -> " + " | ".join(parts))
 
 if __name__ == "__main__":
     main()
-

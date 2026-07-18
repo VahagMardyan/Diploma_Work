@@ -100,10 +100,16 @@ class PowerNet(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-def train_model():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    # 1. Loading data
+TARGET_CONFIGS = {
+    "dynamic_power_uW": "./Model/dynamic_power_predictor_model.pth",
+    "leakage_power_uW": "./Model/leakage_power_predictor_model.pth",
+}
+
+_LEGACY_TOTAL_POWER_WEIGHT_PATH = "./Model/power_predictor_model.pth"
+
+
+def _load_training_dataframe():
+    """Load, concatenate, and filter the raw datasets shared by every target."""
     print("Loading datasets...")
     df1 = pd.read_csv("../Datasets/dataset_power.csv")
     df2 = pd.read_csv("../Datasets/dataset_power_alt.csv")
@@ -111,15 +117,16 @@ def train_model():
 
     df = df[df['cell_count'] > 0]
     df = df[df['total_power_uW'] >= 0.1]
+    return df.reset_index(drop=True)
 
-    # We apply log-scale to both Target and large features.
-    y_raw = df['total_power_uW'].values.astype(np.float32)
-    y_log = np.log1p(y_raw)
 
+def _fit_preprocessor(df):
+    """Fit the shared ColumnTransformer once. Inputs don't depend on the
+    target column, so the same fitted preprocessor is valid for every
+    target we train against."""
     df = engineer_features(df)
     features, num_features, cat_features = get_feature_names()
 
-    # 2. Preprocessing
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', StandardScaler(), num_features),
@@ -127,30 +134,43 @@ def train_model():
         ])
 
     X_processed = preprocessor.fit_transform(df[features]).astype(np.float32)
-    input_dim = X_processed.shape[1]
-    print(f"New Input Dimension (Features count): {input_dim}")
+    return df, preprocessor, X_processed
 
-    # 3. Train/Val Split
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_processed, y_log, test_size=0.2, random_state=42
-    )
-    y_val_true = np.expm1(y_val) 
+
+def train_single_target(X_processed, df, target_column, weight_path, device,
+                         epochs=60, train_idx=None, val_idx=None):
+    """Train a PowerNet to predict `target_column` (log1p-scaled) and save
+    its weights to `weight_path`. If train_idx/val_idx are given, that split
+    is reused instead of computing a new random split, so results across
+    multiple targets stay comparable row-for-row."""
+    print(f"\n{'='*50}")
+    print(f"Training target: {target_column}")
+    print(f"{'='*50}")
+
+    y_raw = df[target_column].values.astype(np.float32)
+    y_log = np.log1p(y_raw)
+    input_dim = X_processed.shape[1]
+
+    if train_idx is None or val_idx is None:
+        train_idx, val_idx = train_test_split(
+            np.arange(len(df)), test_size=0.2, random_state=42
+        )
+
+    X_train, X_val = X_processed[train_idx], X_processed[val_idx]
+    y_train, y_val = y_log[train_idx], y_log[val_idx]
+    y_val_true = np.expm1(y_val)
 
     train_dataset = TensorDataset(torch.tensor(X_train), torch.tensor(y_train).unsqueeze(1))
     train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=True)
 
     model = PowerNet(input_dim).to(device)
     criterion = nn.MSELoss()
-
     optimizer = optim.AdamW(model.parameters(), lr=0.003, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-    EPOCHS = 60
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
-
-    # 5. Training
-    print(f"\nTraining Neural Network ({EPOCHS} Epochs with Scheduler)...")
+    print(f"Training Neural Network ({epochs} Epochs with Scheduler)...")
     model.train()
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         epoch_loss = 0
         for batch_X, batch_y in train_loader:
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
@@ -162,12 +182,11 @@ def train_model():
             optimizer.step()
             epoch_loss += loss.item()
 
-        scheduler.step() 
+        scheduler.step()
 
         if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/{EPOCHS} - Loss: {epoch_loss/len(train_loader):.5f} - LR: {scheduler.get_last_lr()[0]:.5f}")
+            print(f"Epoch {epoch+1}/{epochs} - Loss: {epoch_loss/len(train_loader):.5f} - LR: {scheduler.get_last_lr()[0]:.5f}")
 
-    # 6. Rating
     model.eval()
     with torch.no_grad():
         X_val_tensor = torch.tensor(X_val).to(device)
@@ -182,22 +201,71 @@ def train_model():
     mask = y_val_true > 0.1
     mape_stable = np.mean(np.abs((y_val_true[mask] - preds_uW[mask]) / y_val_true[mask])) * 100
 
-    WEIGHT_PATH = "./Model/power_predictor_model.pth"
+    torch.save(model.state_dict(), weight_path)
+    print(f"Model weights saved to '{weight_path}'")
 
-    torch.save(model.state_dict(), f'{WEIGHT_PATH}')
-    print(f"Model weights saved to '{WEIGHT_PATH}'")
-
-    PREPROCESSOR_PATH = "./Model/preprocessor.joblib"
-    joblib.dump(preprocessor, f'{PREPROCESSOR_PATH}')
-    print(f"Preprocessor saved to '{PREPROCESSOR_PATH}'")
-
-    print("\n" + "="*50)
-    print("UPDATED EVALUATION RESULTS (Non-Log Scale uW):")
+    print(f"\nEVALUATION RESULTS for {target_column} (Non-Log Scale uW):")
     print(f"MAE:        {mae:.4f} uW")
     print(f"R2 Score:   {r2:.4f}")
     print(f"Stable MAPE: {mape_stable:.2f}%")
-    print("="*50)
+
+    return {"target": target_column, "mae": mae, "r2": r2, "mape_stable": mape_stable}
+
+
+def train_model():
+    """Backwards-compatible single-target entry point: trains only the
+    original total_power_uW model."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    df = _load_training_dataframe()
+    df, preprocessor, X_processed = _fit_preprocessor(df)
+    print(f"Input Dimension (Features count): {X_processed.shape[1]}")
+
+    train_single_target(
+        X_processed, df, "total_power_uW", _LEGACY_TOTAL_POWER_WEIGHT_PATH, device
+    )
+
+    PREPROCESSOR_PATH = "./Model/preprocessor.joblib"
+    joblib.dump(preprocessor, PREPROCESSOR_PATH)
+    print(f"Preprocessor saved to '{PREPROCESSOR_PATH}'")
+
+
+def train_all_models(epochs=60):
+    """Trains one PowerNet per entry in TARGET_CONFIGS (total, dynamic,
+    leakage power), reusing a single fitted preprocessor and a single
+    train/val split across all three for a fair, comparable evaluation."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    df = _load_training_dataframe()
+    df, preprocessor, X_processed = _fit_preprocessor(df)
+    print(f"Input Dimension (Features count): {X_processed.shape[1]}")
+
+    train_idx, val_idx = train_test_split(
+        np.arange(len(df)), test_size=0.2, random_state=42
+    )
+
+    results = []
+    for target_column, weight_path in TARGET_CONFIGS.items():
+        metrics = train_single_target(
+            X_processed, df, target_column, weight_path, device,
+            epochs=epochs, train_idx=train_idx, val_idx=val_idx,
+        )
+        results.append(metrics)
+
+    PREPROCESSOR_PATH = "./Model/preprocessor.joblib"
+    joblib.dump(preprocessor, PREPROCESSOR_PATH)
+    print(f"\nPreprocessor saved to '{PREPROCESSOR_PATH}' (shared by all targets)")
+
+    print("\n" + "=" * 50)
+    print("SUMMARY (all targets)")
+    print("=" * 50)
+    for r in results:
+        print(f"{r['target']:<18} MAE: {r['mae']:.4f} uW | R2: {r['r2']:.4f} | MAPE: {r['mape_stable']:.2f}%")
+
+    return results
+
 
 if __name__ == "__main__":
-    train_model()
-
+    train_all_models()
