@@ -12,7 +12,7 @@ from model import PowerNet, engineer_features, get_feature_names, TARGET_CONFIGS
 
 def load_model(model_path, input_dim, device):
     model = PowerNet(input_dim).to(device)
-    state_dict = torch.load(model_path, map_location=device)
+    state_dict = torch.load(model_path, map_location=device, weights_only=True)
     if isinstance(state_dict, nn.Module):
         model = state_dict.to(device)
     else:

@@ -145,6 +145,7 @@ class PredictionWindow(QMainWindow):
         self._export_csv_action.setEnabled(enabled)
         self._export_json_action.setEnabled(enabled)
         self._export_xlsx_action.setEnabled(enabled)
+        self._copy_button.setEnabled(enabled)
 
     def _export_results(self, fmt: str):
         if self._dataframe is None:
@@ -194,9 +195,48 @@ class PredictionWindow(QMainWindow):
 
         self._status_label.setText(f"Exported {len(export_df)} row(s) to {Path(file_path).name}.")
 
+    def _copy_results(self):
+        if self._dataframe is None:
+            return
+
+        prediction_columns = [
+            "predicted_dynamic_power_uW",
+            "predicted_leakage_power_uW",
+            "predicted_total_power_uW",
+        ]
+
+        if not all(col in self._dataframe.columns for col in prediction_columns):
+            QMessageBox.warning(
+                self, "Nothing to Copy", "Run Predict Power first, then copy."
+            )
+            return
+
+        if len(self._dataframe) == 1:
+            row = self._dataframe.iloc[0]
+            text = (
+            f"Predicted Dynamic: {row['predicted_dynamic_power_uW']:.4f} µW\n"
+            f"Predicted Leakage: {row['predicted_leakage_power_uW']:.4f} µW\n"
+            f"Predicted Total: {row['predicted_total_power_uW']:.4f} µW"
+        )
+        else:
+            export_df = self._dataframe[prediction_columns]
+            text = export_df.to_csv(sep="\t", index=False)
+
+        QApplication.clipboard().setText(text)
+        self._status_label.setText("Predicted power values copied to clipboard.")
+
+
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
+
+        self._copy_button = QPushButton("Copy Result")
+        self._copy_button.setEnabled(False)
+        self._copy_button.clicked.connect(self._copy_results)
+        self._copy_button.setObjectName("copyButton")
+        self._copy_button.setToolTip("Copy predicted power values to clipboard.")
+        self._copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+
         self._build_menu_bar_()
 
         title_label = QLabel("Digital IC Power Prediction")
@@ -275,6 +315,7 @@ class PredictionWindow(QMainWindow):
         buttons_layout.addWidget(browse_button)
         buttons_layout.addStretch(1)
         buttons_layout.addWidget(self._reset_button)
+        buttons_layout.addWidget(self._copy_button)
         buttons_layout.addWidget(self._predict_button)
         left_panel.addLayout(buttons_layout)
         left_panel.addSpacing(8)
@@ -335,6 +376,9 @@ class PredictionWindow(QMainWindow):
             QPushButton#resetButton { background: transparent; color: #DDDDDD; border: 1px solid #444444; }
             QPushButton#resetButton:hover:enabled { background: #2A2A2A; border-color: #666666; }
             QPushButton#resetButton:disabled { color: #555555; border-color: #2E2E2E; }
+            QPushButton#copyButton { background: transparent; color: #DDDDDD; border: 1px solid #444444; }
+            QPushButton#copyButton:hover:enabled { background: #2A2A2A; border-color: #666666; }
+            QPushButton#copyButton:disabled { color: #555555; border-color: #2E2E2E; }
             QWidget#boxFrame { background: #191919; border: 1px solid #2E2E2E; border-radius: 16px; }
             QTableView { background: #141414; border: 1px solid #2E2E2E; gridline-color: #2E2E2E; color: #EEEEEE; }
             QHeaderView::section { background: #1F1F1F; color: #EEEEEE; padding: 6px; border: none; }
@@ -447,24 +491,24 @@ class PredictionWindow(QMainWindow):
         if len(predicted_dataframe) == 1:
             row = predicted_dataframe.iloc[0]
             self._result_label.setText(
-                f"Predicted Total: {row['predicted_total_power_uW']:.4f} µW  |  "
                 f"Dynamic: {row['predicted_dynamic_power_uW']:.4f} µW  |  "
-                f"Leakage: {row['predicted_leakage_power_uW']:.4f} µW"
+                f"Leakage: {row['predicted_leakage_power_uW']:.4f} µW  |   "
+                f"Predicted Total: {row['predicted_total_power_uW']:.4f} µW"
             )
         else:
             total = predicted_dataframe["predicted_total_power_uW"]
             dyn = predicted_dataframe["predicted_dynamic_power_uW"]
             leak = predicted_dataframe["predicted_leakage_power_uW"]
             self._result_label.setText(
-                f"Total (avg): {total.mean():.4f} µW  |  "
                 f"Dynamic (avg): {dyn.mean():.4f} µW  |  "
-                f"Leakage (avg): {leak.mean():.4f} µW"
+                f"Leakage (avg): {leak.mean():.4f} µW |  "
+                f"Total (avg): {total.mean():.4f} µW"
             )
 
         prediction_columns = [
-            "predicted_total_power_uW",
             "predicted_dynamic_power_uW",
             "predicted_leakage_power_uW",
+            "predicted_total_power_uW",
         ]
         self._populate_table(self._prediction_table, predicted_dataframe[prediction_columns])
 
@@ -487,7 +531,7 @@ class PredictionWindow(QMainWindow):
                 torch.cuda.empty_cache()
 
         model = PowerNet(input_dim).to(self._device)
-        state_dict = torch.load(model_path, map_location=self._device)
+        state_dict = torch.load(model_path, map_location=self._device, weights_only=True)
         if isinstance(state_dict, torch.nn.Module):
             model = state_dict.to(self._device)
         else:

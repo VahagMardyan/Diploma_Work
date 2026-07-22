@@ -4,12 +4,16 @@ This code helps to extract a specific row from specific dataset. Available forma
 import pandas as pd
 import json
 
-df = pd.read_csv('../../Verilog/Test/dataset_power_test.csv')
-
 user_input_index = int(input("Index: ")) # real csv index - 2
 
-if user_input_index > len(df):
-    raise ValueError(f"Index should be less or equal than {len(df)}")
+include_alt = True if input("Alt? (Press any key if yes otherwise press Enter): ") else False
+
+CSV_PATH = f"../../Verilog/Test/dataset_power_test{'_alt' if include_alt else ''}.csv"
+
+df = pd.read_csv(CSV_PATH)
+
+if user_input_index < 2 or user_input_index > len(df) + 1:
+    raise ValueError(f"Index should be between 2 and {len(df) + 1}")
 
 row_data = df.iloc[user_input_index - 2]
 
@@ -37,5 +41,5 @@ elif FILE_PATH.endswith('.json'):
 else:
     raise ValueError(f"Error: Wrong format in '{FILE_PATH}'. Only `.json`, `.csv` or `xlsx` are allowed.")
 
-print(f"{user_input_index}-th row saved successfully to {FILE_PATH}.")
+print(f"{user_input_index}-th row (from {CSV_PATH}) saved successfully to {FILE_PATH}.")
 
