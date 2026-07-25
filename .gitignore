@@ -20,13 +20,13 @@ pip-log.txt
 *.swp
 
 # ML Models and Beyond
-Models/
-Model/
-*.joblib
-*.pkl
-*.onnx
-*.onnx.data
-*.gv
+# Models/
+# Model/
+# *.joblib
+# *.pkl
+# *.onnx
+# *.onnx.data
+# *.gv
 
 # OS files
 .DS_Store
