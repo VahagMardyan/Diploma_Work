@@ -3,11 +3,11 @@ import json
 
 user_input_index = int(input("Index: ")) # real csv index - 2
 
-include_alt = True if input("Alt? (Press any key if yes otherwise press Enter): ") else False
+# include_alt = True if input("Alt? (Press any key if yes otherwise press Enter): ") else False
 
-CSV_PATH = f"../../Verilog/Test/dataset_power_test{'_alt' if include_alt else ''}.csv"
+# CSV_PATH = f"../../Verilog/Test/dataset_power_test{'_alt' if include_alt else ''}.csv"
 # CSV_PATH = f"../../Verilog/Test/decoder/dataset_power_test_decoder.csv"
-# CSV_PATH = f"../../Verilog/Test/encoder/dataset_power_test_encoder.csv"
+CSV_PATH = f"../../Verilog/Test/encoder/dataset_power_test_encoder.csv"
 
 df = pd.read_csv(CSV_PATH)
 

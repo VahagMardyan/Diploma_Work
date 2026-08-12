@@ -545,7 +545,7 @@ class PredictionWindow(QMainWindow):
         model = self._load_model(target_column, model_path, X_tensor.shape[1])
         with torch.no_grad():
             preds_log = model(X_tensor).cpu().numpy().flatten()
-        return np.expm1(preds_log)
+        return np.exp(preds_log)
 
     def _run_prediction(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         base_dir = Path(__file__).resolve().parent

@@ -73,7 +73,9 @@ def main():
         model = load_model(model_path, input_dim, device)
         with torch.no_grad():
             preds_log = model(X_tensor).cpu().numpy().flatten()
-        predicted_values = np.expm1(preds_log)
+        # Must match the training-time transform in model.py: plain log/exp,
+        # not log1p/expm1 (see train_single_target for why).
+        predicted_values = np.exp(preds_log)
         predictions[target_column] = predicted_values
         df_new[f'predicted_{target_column}'] = predicted_values
 
@@ -120,7 +122,7 @@ def main():
             mape = df_new[f'error_{target}_%'].mean()
             print(f"Mean Error for {target:18s}: {mape:.2f}%")
 
-    output_file = "../Results/prediction_results_with_errors.csv"
+    output_file = "../Results/prediction_results_with_errors_decoder.csv"
     df_new.to_csv(output_file, index=False)
     print(f"\n[+] Full per-row results and errors saved to: '{output_file}'")
 
