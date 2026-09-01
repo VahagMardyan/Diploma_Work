@@ -466,8 +466,8 @@ check_part "Part5" \
     "$PART5_2_NEW" \
 
     "Part5_3" \
-    "./Part5/Part5_3/dataset_power_part5_3.csv" \
-    "./Part5/Part5_3/dataset_power_alt_part5_3.csv" \
+    "./Part5/Part5_3/dataset_power_part5_5.csv" \
+    "./Part5/Part5_3/dataset_power_alt_part5_5.csv" \
     "$PART5_3_OLD" \
     "$PART5_3_NEW"
 

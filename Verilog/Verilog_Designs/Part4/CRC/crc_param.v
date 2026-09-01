@@ -1,4 +1,3 @@
-// crc_param.v - Sequential CRC (processes 8 bits per clock)
 module crc_param #(
     parameter CRC_W = 8,
     parameter [CRC_W-1:0] POLY = 8'h07,   // CRC-8-CCITT: 0x07
@@ -10,23 +9,30 @@ module crc_param #(
     input  wire [7:0]         data_in,
     output reg  [CRC_W-1:0]   crc_out
 );
-    reg [CRC_W-1:0] crc;
+
+    reg [CRC_W-1:0] crc_comb;
     integer i;
-    
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            crc <= INIT;
+            crc_out <= INIT;
         end else if (en) begin
-            crc <= crc ^ { {CRC_W-8{1'b0}}, data_in };
-            for (i=0; i<8; i=i+1) begin
-                if (crc[CRC_W-1]) begin
-                    crc <= {crc[CRC_W-2:0], 1'b0} ^ POLY;
-                end else begin
-                    crc <= {crc[CRC_W-2:0], 1'b0};
-                end
+            crc_out <= crc_comb;
+        end
+    end
+
+    always @(*) begin
+        crc_comb = crc_out;
+        
+        crc_comb[7:0] = crc_comb[7:0] ^ data_in;
+        
+        for (i = 0; i < 8; i = i + 1) begin
+            if (crc_comb[CRC_W-1]) begin
+                crc_comb = {crc_comb[CRC_W-2:0], 1'b0} ^ POLY;
+            end else begin
+                crc_comb = {crc_comb[CRC_W-2:0], 1'b0};
             end
         end
     end
-    
-    assign crc_out = crc;
+
 endmodule
