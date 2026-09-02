@@ -448,7 +448,11 @@ foreach verilog_file $all_v_files {
         if {!$per_freq_recompile} {
             set period [expr {1000.0 / $synth_freq}]
             safe_remove_all_clocks
-            create_clock -name vclk -period $period
+            if {[sizeof_collection [get_ports -quiet clk]] > 0} { 
+                create_clock -name vclk -period $period [get_ports clk] 
+            } else { 
+                create_clock -name vclk -period $period 
+            }
             set_input_delay -clock vclk 0 [all_inputs]
             set_output_delay -clock vclk 0 [all_outputs]
 
