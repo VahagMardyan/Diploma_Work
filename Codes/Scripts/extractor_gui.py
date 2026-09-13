@@ -39,7 +39,7 @@ class ExtractorWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Digital IC Data Exporter")
-        self.setMinimumSize(820, 560)
+        self.setMinimumSize(820, 650)
         self._row_count: int | None = None
         self._build_ui()
         self._apply_style()
@@ -123,8 +123,9 @@ class ExtractorWindow(QMainWindow):
         form = QFormLayout(box)
         output = QLineEdit()
         output.setPlaceholderText("Choose .json, .csv, or .xlsx output")
+        default_filename = "extracted_features.json" if mode == "extract" else "extracted_targets.json"
         browse = QPushButton("Output File")
-        browse.clicked.connect(lambda: self._browse_output(output))
+        browse.clicked.connect(lambda: self._browse_output(output, default_filename))
         output_layout = QHBoxLayout()
         output_layout.addWidget(output)
         output_layout.addWidget(browse)
@@ -166,8 +167,13 @@ class ExtractorWindow(QMainWindow):
         self._range_info.setText(f"Valid dataset row range: 0 to {row_count - 1}")
         self._show_status(f"Loaded {source.name}: {row_count} data row(s).")
 
-    def _browse_output(self, output: QLineEdit) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Choose export destination", "export.json", "JSON Files (*.json);;CSV Files (*.csv);;Excel Files (*.xlsx)")
+    def _browse_output(self, output : QLineEdit, default_name : str = "export.json") -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Choose export destination",
+            default_name,
+            "JSON Files (*.json);; CSV Files (*.csv);; Excel Files (*.xlsx)"
+        )
         if path:
             output.setText(path)
 
@@ -241,7 +247,7 @@ class ExtractorWindow(QMainWindow):
             QLabel#titleLabel { font-size: 26px; font-weight: 700; color: #FFFFFF; }
             QLabel#subtitleLabel, QLabel#rangeInfo { color: #CCCCCC; font-size: 14px; }
             QGroupBox { background: #191919; border: 1px solid #2E2E2E; border-radius: 12px; margin-top: 12px; padding: 12px; font-weight: 700; color: #FFFFFF; }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
+            QGroupBox::title { subcontrol-origin: padding; left: 12px; padding: 0 5px; }
             QLineEdit { background: #141414; border: 1px solid #3A3A3A; border-radius: 8px; color: #EEEEEE; padding: 9px; }
             QLineEdit:focus { border-color: #3A8DFF; }
             QRadioButton { color: #DDDDDD; padding: 5px 12px; }
