@@ -1,6 +1,6 @@
 {
   "clock_frequency_mhz": 15,
-  "toggle_rate": 0.25,
+  "toggle_rate": 0.5,
   "static_probability": 0.95,
   "vdd": 0.6,
   "temperature": 25,
@@ -26,8 +26,8 @@
   "depth_mean": 2,
   "depth_std": 0,
   "depth_max": 2,
-  "avg_net_toggle": 0.162,
-  "toggle_attenuation": 0.648,
+  "avg_net_toggle": 0.312,
+  "toggle_attenuation": 0.624,
   "critical_path_delay": 0.01,
   "wns": 9.99,
   "tns": 0,

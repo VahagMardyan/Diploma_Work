@@ -13,9 +13,8 @@ SCRIPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../Script
 if SCRIPTS_DIR not in sys.path:
     sys.path.append(SCRIPTS_DIR)
 
-# Import components directly from your existing model.py
 try:
-    from Scripts.model import (
+    from model import (
         DynamicResNet,
         LeakageResNet, 
         engineer_domain_features, 
@@ -30,29 +29,23 @@ except ImportError:
 sns.set_theme(style="whitegrid")
 plt.rcParams.update({'font.size': 11, 'figure.autolayout': True})
 
-MODEL_DIR = '../Scripts/Model'  # Adjust path if needed
+MODEL_DIR = '../Scripts/Model'
 
 def load_all_models():
     """Loads preprocessors and trained PyTorch ResNet models."""
     print("[*] Loading trained models and preprocessors...")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Load Dynamic Model & Preprocessor
     prep_dyn = joblib.load(os.path.join(MODEL_DIR, "preprocessor_dynamic.joblib"))
     dyn_state = torch.load(os.path.join(MODEL_DIR, "dynamic_power_predictor_model.pth"), map_location=device, weights_only=True)
-    dyn_features, _, _ = get_dynamic_features()
-    dummy_input_dim_dyn = len(dyn_features) # Will be dynamically sized during inference setup
-    model_dyn = DynamicResNet
     
-    # Load Leakage Model & Preprocessor
     prep_leak = joblib.load(os.path.join(MODEL_DIR, "preprocessor_leakage.joblib"))
     leak_state = torch.load(os.path.join(MODEL_DIR, "leakage_power_predictor_model.pth"), map_location=device, weights_only=True)
-    model_leak = LeakageResNet
 
     return prep_dyn, dyn_state, prep_leak, leak_state, device
 
 def predict_power(df, models):
-    """Runs real PyTorch inference on the dataframe."""
+    """Runs PyTorch inference on the dataframe."""
     prep_dyn, dyn_state, prep_leak, leak_state, device = models
     
     df_eng = engineer_domain_features(df)
@@ -112,6 +105,7 @@ def load_data_and_split(file_list, models):
 
     unique_groups = df["design_name"].nunique()
 
+    # Apply exact GroupShuffleSplit matching model.py
     if unique_groups > 1:
         indices = np.arange(len(df))
         groups = df["design_name"].to_numpy()

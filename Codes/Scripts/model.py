@@ -207,20 +207,31 @@ def calculate_metrics(y_true, y_pred):
 # 2. PyTorch Architectures & MAPELoss
 # ============================================================
 
-class MAPELoss(nn.Module):
-    def __init__(self, eps=1e-3):
+class WeightedMAPELoss(nn.Module):
+    def __init__(self, eps=1e-3, threshold_uW=0.1, low_weight=5.0, high_weight=1.0):
         super().__init__()
         self.eps = eps
+        self.log_threshold = np.log(threshold_uW)
+        self.low_weight = low_weight
+        self.high_weight = high_weight
 
     def forward(self, y_pred_log, y_true_log):
         y_pred = torch.exp(y_pred_log)
         y_true = torch.exp(y_true_log)
-        relative_error = torch.abs(y_pred - y_true) / (y_true + self.eps)
-        return torch.mean(relative_error)
 
+        relative_error = torch.abs(y_pred - y_true) / (y_true + self.eps)
+        
+        weights = torch.where(
+            y_true_log < self.log_threshold, 
+            torch.tensor(self.low_weight, device=y_true_log.device), 
+            torch.tensor(self.high_weight, device=y_true_log.device)
+        )
+        
+        weighted_error = relative_error * weights
+        return torch.mean(weighted_error)
 
 class ResidualBlock(nn.Module):
-    def __init__(self, dim, dropout=0.15):
+    def __init__(self, dim, dropout=0.25):
         super().__init__()
         self.fc1 = nn.Linear(dim, dim)
         self.norm1 = nn.LayerNorm(dim)
@@ -278,7 +289,7 @@ class LeakageResNet(nn.Module):
 # 3. Dynamic Power Training Execution
 # ============================================================
 
-def train_dynamic_pytorch(df_train, df_val, df_test, device, epochs=200, patience=35):
+def train_dynamic_pytorch(df_train, df_val, df_test, device, epochs=200, patience=20):
     print("\n" + "=" * 60)
     print("Training DYNAMIC Power (DynamicResNet + TensorBoard)")
     print("=" * 60)
@@ -309,9 +320,9 @@ def train_dynamic_pytorch(df_train, df_val, df_test, device, epochs=200, patienc
     X_test_t = torch.tensor(X_test, device=device)
 
     model = DynamicResNet(X_train.shape[1]).to(device)
-    criterion = MAPELoss(eps=1e-2)
+    criterion = WeightedMAPELoss(eps=1e-2, threshold_uW=0.1, low_weight=2.0, high_weight=1.0)
 
-    optimizer = optim.AdamW(model.parameters(), lr=0.0008, weight_decay=1e-3)
+    optimizer = optim.AdamW(model.parameters(), lr=0.0008, weight_decay=5e-3)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=epochs, eta_min=1e-6
     )
@@ -425,7 +436,7 @@ def train_leakage_pytorch(df_train, df_val, df_test, device, epochs=120, patienc
     X_test_t = torch.tensor(X_test, device=device)
 
     model = LeakageResNet(X_train.shape[1]).to(device)
-    criterion = MAPELoss(eps=1e-3)
+    criterion = WeightedMAPELoss(eps=1e-3, threshold_uW=0.005, low_weight=3.0, high_weight=1.0)
     optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5
@@ -544,4 +555,4 @@ def train_all_models(train_dynamic=True, train_leakage=True):
 
 
 if __name__ == "__main__":
-    train_all_models(train_dynamic=True, train_leakage=False)
+    train_all_models(train_dynamic=True, train_leakage=True)
