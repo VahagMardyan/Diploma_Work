@@ -1,5 +1,5 @@
 {
-    "dynamic_power_uW": 0.3239947,
-    "leakage_power_uW": 0.000384144,
-    "total_power_uW": 0.324378844
+  "dynamic_power_uW": 0.0164876,
+  "leakage_power_uW": 9.69e-05,
+  "total_power_uW": 0.016584455
 }

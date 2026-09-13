@@ -1,47 +1,137 @@
-"""
-This code helps to extract a specific row from specific dataset. Available formats: 'csv', 'json' and 'xlsx'.
-"""
-import pandas as pd
+"""Export a dataset row as model features, measured targets, or both."""
+
+from __future__ import annotations
+
+import argparse
 import json
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Optional
 
-user_input_index = int(input("Index: ")) # real csv index - 2
+import pandas as pd
 
-# include_alt = True if input("Alt? (Press any key if yes otherwise press Enter): ") else False
-
-# CSV_PATH = f"../../Verilog/Test/dataset_power_test{'_alt' if include_alt else ''}.csv"
-# CSV_PATH = f"../../Verilog/Test/decoder/dataset_power_test_decoder.csv"
-CSV_PATH = f"../../Verilog/Test/encoder/dataset_power_test_encoder.csv"
-
-df = pd.read_csv(CSV_PATH)
-
-if user_input_index < 2 or user_input_index > len(df) + 1:
-    raise ValueError(f"Index should be between 2 and {len(df) + 1}")
-
-row_data = df.iloc[user_input_index - 2]
-
-required_features = [
-    'clock_frequency_mhz', 'toggle_rate', 'static_probability', 'vdd', 'temperature',
-    'cell_count', 'comb_cell_count', 'seq_cell_count', 'inv_count', 'buf_count', 
-    'nand_count', 'nor_count', 'xor_count', 'mux_count', 'other_count', 
-    'total_area', 'num_nets', 'num_inputs', 'num_outputs', 'avg_cell_area', 
-    'max_fanout', 'avg_fanout', 'avg_fanin', 'logic_depth', 'depth_mean', 
-    'depth_std', 'depth_max', 'avg_net_toggle', 'toggle_attenuation', 
-    'critical_path_delay', 'wns', 'tns', 'process', 'pvt_corner'
+MODEL_FEATURES = [
+    "clock_frequency_mhz", "toggle_rate", "static_probability", "vdd",
+    "temperature", "cell_count", "comb_cell_count", "seq_cell_count",
+    "inv_count", "buf_count", "nand_count", "nor_count", "xor_count",
+    "mux_count", "other_count", "total_area", "num_nets", "num_inputs",
+    "num_outputs", "avg_cell_area", "max_fanout", "avg_fanout", "avg_fanin",
+    "logic_depth", "depth_mean", "depth_std", "depth_max", "avg_net_toggle",
+    "toggle_attenuation", "critical_path_delay", "wns", "tns", "process",
+    "pvt_corner",
 ]
+POWER_TARGETS = ["dynamic_power_uW", "leakage_power_uW", "total_power_uW"]
 
-subset = row_data[required_features]
 
-FILE_PATH = "./Test/testing.json"
+def print_usage_example() -> None:
+    """Print user-friendly usage instructions and examples."""
+    print("""
+================================================================================
+ EXTRACTOR UTILITY USAGE EXAMPLES
+================================================================================
+Usage:
+  python extractor.py <source_csv> <output_file> --row <index> [--selection <type>]
 
-if FILE_PATH.endswith('.csv'):
-    pd.DataFrame([subset]).to_csv(FILE_PATH, index=False)
-elif FILE_PATH.endswith('.xlsx'):
-    pd.DataFrame([subset]).to_excel(FILE_PATH, index=False)
-elif FILE_PATH.endswith('.json'):
-    with open(FILE_PATH, 'w', encoding='utf-8') as f:
-        json.dump(subset.to_dict(), f, indent=4)
-else:
-    raise ValueError(f"Error: Wrong format in '{FILE_PATH}'. Only `.json`, `.csv` or `xlsx` are allowed.")
+Options for --selection:
+  features  : Export model input features only (Default)
+  targets   : Export ground-truth power targets only
+  all       : Export both features and power targets
 
-print(f"{user_input_index}-th row (from {CSV_PATH}) saved successfully to {FILE_PATH}.")
+Examples:
+  1. Extract row 0 input features to JSON (for prediction testing):
+     python extractor.py ../Datasets/dataset_power.csv Test/sample.json --row 0
 
+  2. Extract row 5 full data (all columns) to CSV:
+     python extractor.py ../Datasets/dataset_power.csv Test/sample.csv --row 5 --selection all
+================================================================================
+""")
+
+
+def select_columns(dataframe: pd.DataFrame, selection: str) -> list[str]:
+    """Return the column contract for an export selection."""
+    selections = {
+        "features": MODEL_FEATURES,
+        "targets": POWER_TARGETS,
+        "all": MODEL_FEATURES + POWER_TARGETS,
+    }
+    columns = selections[selection]
+    missing = sorted(set(columns).difference(dataframe.columns))
+    if missing:
+        raise ValueError(f"Dataset is missing required columns: {', '.join(missing)}")
+    return columns
+
+
+def export_row(
+    source: Path,
+    output: Path,
+    row_index: int,
+    selection: str,
+) -> None:
+    """Export one zero-based CSV row in JSON, CSV, or Excel format.
+
+    Args:
+        source: Source CSV dataset.
+        output: Destination file ending in ``.json``, ``.csv``, or ``.xlsx``.
+        row_index: Zero-based index of the row to export.
+        selection: ``features``, ``targets``, or ``all``.
+    """
+    if not source.is_file():
+        raise FileNotFoundError(f"Source dataset not found: {source}")
+    dataframe = pd.read_csv(source)
+    if not 0 <= row_index < len(dataframe):
+        raise IndexError(f"Row index must be between 0 and {len(dataframe) - 1}.")
+
+    record = dataframe.loc[
+        dataframe.index[row_index], select_columns(dataframe, selection)
+    ]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.suffix.lower() == ".json":
+        with output.open("w", encoding="utf-8") as output_file:
+            json.dump(record.to_dict(), output_file, indent=2)
+    elif output.suffix.lower() == ".csv":
+        record.to_frame().T.to_csv(output, index=False)
+    elif output.suffix.lower() == ".xlsx":
+        record.to_frame().T.to_excel(output, index=False)
+    else:
+        raise ValueError("Output format must be JSON, CSV, or XLSX.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the row-export command-line interface."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path, help="Source CSV dataset.")
+    parser.add_argument(
+        "output", type=Path, help="Destination .json, .csv, or .xlsx file."
+    )
+    parser.add_argument("--row", type=int, required=True, help="Zero-based row index.")
+    parser.add_argument(
+        "--selection",
+        choices=("features", "targets", "all"),
+        default="features",
+        help="Columns to export (default: %(default)s).",
+    )
+    return parser
+
+
+def main(arguments: Optional[Sequence[str]] = None) -> int:
+    """Execute the row exporter and return a process status code."""
+    provided_args = list(sys.argv[1:] if arguments is None else arguments)
+
+    # Display clean usage text if run without arguments or with -h/--help
+    if not provided_args or provided_args[0] in ("-h", "--help"):
+        print_usage_example()
+        return 0
+
+    parsed = build_parser().parse_args(provided_args)
+    try:
+        export_row(parsed.source, parsed.output, parsed.row, parsed.selection)
+    except (FileNotFoundError, IndexError, OSError, ValueError) as error:
+        print(f"Export failed: {error}")
+        return 1
+    print(f"Exported row {parsed.row} from {parsed.source} to {parsed.output}.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

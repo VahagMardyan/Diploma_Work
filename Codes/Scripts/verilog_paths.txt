@@ -1,0 +1,5 @@
+../../Verilog/Test/decoder/dataset_power_test_decoder.csv
+../../Verilog/Test/encoder/dataset_power_test_encoder.csv
+../../Verilog/Test/filter/dataset_power_test.csv
+../../Verilog/Test/filter/dataset_power_test_alt.csv
+../../Verilog/Test/tests/dataset_power_test.csv

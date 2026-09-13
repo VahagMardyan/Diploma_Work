@@ -1,94 +1,259 @@
+"""Command-line inference interface for Dual PyTorch IC power models.
+
+The module intentionally keeps presentation and file I/O thin. ``ICPowerPredictor``
+is the Facade that owns the inference workflow and its model dependencies.
 """
-The main code (CLI)...
-"""
-import os
+
+from __future__ import annotations
+
+import argparse
 import json
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, Optional, Type, Union
+
 import joblib
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-from model import PowerNet, engineer_features, get_feature_names, TARGET_CONFIGS
 
-def load_model(model_path, input_dim, device):
-    model = PowerNet(input_dim).to(device)
-    state_dict = torch.load(model_path, map_location=device, weights_only=True)
-    if isinstance(state_dict, nn.Module):
-        model = state_dict.to(device)
-    else:
+from model import (
+    DynamicResNet,
+    LeakageResNet,
+    engineer_domain_features,
+    get_dynamic_features,
+    get_leakage_features,
+)
+
+InputPath = Union[str, Path]
+
+
+class ICPowerPredictor:
+    """Facade for loading and executing dual-model IC power inference.
+
+    Args:
+        models_dir: Directory containing model weights and fitted preprocessors.
+        device: Optional PyTorch device; CUDA is selected automatically when present.
+
+    Raises:
+        FileNotFoundError: If one or more inference assets are unavailable.
+        RuntimeError: If an asset cannot be deserialized or is incompatible.
+    """
+
+    def __init__(
+        self,
+        models_dir: InputPath = "./Model",
+        device: Optional[torch.device] = None,
+    ) -> None:
+        self.models_dir = Path(models_dir)
+        self.device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        self._paths = {
+            "dynamic_preprocessor": self.models_dir / "preprocessor_dynamic.joblib",
+            "leakage_preprocessor": self.models_dir / "preprocessor_leakage.joblib",
+            "dynamic_model": self.models_dir / "dynamic_power_predictor_model.pth",
+            "leakage_model": self.models_dir / "leakage_power_predictor_model.pth",
+        }
+        self._verify_assets()
+        self._load_assets()
+
+    def _verify_assets(self) -> None:
+        missing = [str(path) for path in self._paths.values() if not path.is_file()]
+        if missing:
+            formatted_paths = "\n  - ".join(missing)
+            raise FileNotFoundError(
+                f"Missing required inference assets:\n  - {formatted_paths}"
+            )
+
+    def _load_assets(self) -> None:
+        try:
+            self._dynamic_preprocessor = joblib.load(
+                self._paths["dynamic_preprocessor"]
+            )
+            self._leakage_preprocessor = joblib.load(
+                self._paths["leakage_preprocessor"]
+            )
+            self._dynamic_model = self._load_model(
+                DynamicResNet,
+                self._dynamic_preprocessor,
+                self._paths["dynamic_model"],
+            )
+            self._leakage_model = self._load_model(
+                LeakageResNet,
+                self._leakage_preprocessor,
+                self._paths["leakage_model"],
+            )
+        except (AttributeError, OSError, RuntimeError, ValueError, TypeError) as error:
+            raise RuntimeError(
+                "Unable to load the trained PyTorch inference assets. Confirm that "
+                "the weights and preprocessors were produced together."
+            ) from error
+
+    def _load_model(
+        self,
+        model_class: Union[Type[DynamicResNet], Type[LeakageResNet]],
+        preprocessor: Any,
+        weights_path: Path,
+    ) -> Union[DynamicResNet, LeakageResNet]:
+        """Create a model using the preprocessor output dimensionality."""
+        try:
+            input_dimension = len(preprocessor.get_feature_names_out())
+        except AttributeError as error:
+            raise ValueError(
+                f"Preprocessor for '{weights_path.name}' does not expose feature names."
+            ) from error
+
+        model = model_class(input_dimension).to(self.device)
+        state_dict = torch.load(
+            weights_path, map_location=self.device, weights_only=True
+        )
         model.load_state_dict(state_dict)
-    model.eval()
-    return model
+        model.eval()
+        return model
 
-def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    print("=== Digital IC Power Prediction (Inference) ===")
-    
-    input_path = input("Input file path: ")
-    preprocessor_path = "./Model/preprocessor.joblib"
-    model_paths = {target: path for target, path in TARGET_CONFIGS.items()}
-    
-    print(f"Input file path is: {input_path}\n")
-    print(f"Loading '{preprocessor_path}' and {len(model_paths)} model(s)...")
-    
-    # 1. Loading Preprocessor and checking model files
-    missing = [p for p in [preprocessor_path, *model_paths.values()] if not os.path.exists(p)]
-    if missing:
-        print(f"Error: The following file(s) are missing: {', '.join(missing)}")
-        return
-        
-    preprocessor = joblib.load(preprocessor_path)
-    
-    # 2. Reading input data
-    if input_path.endswith('.json'):
-        with open(input_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            data = [data]
-        df_new = pd.DataFrame(data)
-    elif input_path.endswith('.csv'):
-        df_new = pd.read_csv(input_path)
-    elif input_path.endswith('xlsx'):
-        df_new = pd.read_excel(input_path)
-    else:
-        print("Error: File format must be `.json`, `.csv` or `xlsx`.")
-        return
+    def predict(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        """Predict dynamic, leakage, and total power for every input row.
 
-    print(f"{len(df_new)} rows data read successfully!\n")
+        Args:
+            dataframe: Raw design-feature records accepted by the training pipeline.
 
-    # Feature Engineering (Կիրառում ենք 1 տողով՝ 30 տողի փոխարեն)
-    df_new = engineer_features(df_new)
-    features, _, _ = get_feature_names()
+        Returns:
+            A copy of ``dataframe`` augmented with power predictions in microwatts.
 
-    # 3. Data Scaling (Preprocessing) -- shared across all targets
-    X_processed = preprocessor.transform(df_new[features])
-    input_dim = X_processed.shape[1]
-    X_tensor = torch.tensor(X_processed, dtype=torch.float32).to(device)
+        Raises:
+            ValueError: If the input is empty or lacks a required feature.
+        """
+        if dataframe.empty:
+            raise ValueError("The input dataset contains no rows.")
 
-    # 4. Loading each model and predicting its target
-    df_new = df_new.reset_index(drop=True)
-    predictions = {}
-    for target_column, model_path in model_paths.items():
-        model = load_model(model_path, input_dim, device)
-        with torch.no_grad():
-            preds_log = model(X_tensor).cpu().numpy().flatten()
-        predicted_values = np.expm1(preds_log)
-        predictions[target_column] = predicted_values
-        df_new[f'predicted_{target_column}'] = predicted_values
+        engineered = engineer_domain_features(dataframe).reset_index(drop=True)
+        dynamic_features, _, _ = get_dynamic_features()
+        leakage_features, _, _ = get_leakage_features()
+        self._require_features(engineered, dynamic_features + leakage_features)
 
-    # total_power_uW is derived, not modeled: it equals
-    # dynamic_power_uW + leakage_power_uW exactly in the data, so we sum
-    # the two predictions instead of training a third model for it.
-    predictions['total_power_uW'] = predictions['dynamic_power_uW'] + predictions['leakage_power_uW']
-    df_new['predicted_total_power_uW'] = predictions['total_power_uW']
+        dynamic_power = self._predict_component(
+            engineered,
+            dynamic_features,
+            self._dynamic_preprocessor,
+            self._dynamic_model,
+        )
+        leakage_power = self._predict_component(
+            engineered,
+            leakage_features,
+            self._leakage_preprocessor,
+            self._leakage_model,
+        )
 
-    # 5. Printing results
-    print("Prediction is Over.\n")
-    print_order = ['total_power_uW', 'dynamic_power_uW', 'leakage_power_uW']
-    for idx in range(len(df_new)):
-        parts = [f"{target}: {predictions[target][idx]:.4f} uW" for target in print_order]
-        print(f"Row {idx+1} -> " + " | ".join(parts))
+        result = dataframe.copy()
+        result["predicted_dynamic_power_uW"] = dynamic_power
+        result["predicted_leakage_power_uW"] = leakage_power
+        result["predicted_total_power_uW"] = dynamic_power + leakage_power
+        return result
+
+    @staticmethod
+    def _require_features(dataframe: pd.DataFrame, features: Sequence[str]) -> None:
+        missing = sorted(set(features).difference(dataframe.columns))
+        if missing:
+            raise ValueError(
+                f"Input dataset is missing required features: {', '.join(missing)}"
+            )
+
+    def _predict_component(
+        self,
+        dataframe: pd.DataFrame,
+        features: Sequence[str],
+        preprocessor: Any,
+        model: Union[DynamicResNet, LeakageResNet],
+    ) -> np.ndarray:
+        transformed = preprocessor.transform(dataframe[list(features)]).astype(
+            np.float32
+        )
+        inputs = torch.as_tensor(transformed, device=self.device)
+        with torch.inference_mode():
+            log_predictions = model(inputs).cpu().numpy().ravel()
+        return np.exp(log_predictions)
+
+
+def load_input_data(file_path: InputPath) -> pd.DataFrame:
+    """Load CSV, JSON, or Excel records into a dataframe.
+
+    Args:
+        file_path: Existing ``.csv``, ``.json``, ``.xlsx``, or ``.xls`` input file.
+
+    Raises:
+        FileNotFoundError: If ``file_path`` does not exist.
+        ValueError: If the file extension or JSON payload is unsupported.
+    """
+    path = Path(file_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Input file not found: {path}")
+
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path)
+    if path.suffix.lower() in {".xlsx", ".xls"}:
+        return pd.read_excel(path)
+    if path.suffix.lower() == ".json":
+        with path.open(encoding="utf-8") as input_file:
+            payload = json.load(input_file)
+        if isinstance(payload, dict):
+            return pd.DataFrame([payload])
+        if isinstance(payload, list):
+            return pd.DataFrame(payload)
+        raise ValueError("JSON input must contain an object or a list of objects.")
+    raise ValueError("Unsupported input format. Use CSV, JSON, XLS, or XLSX.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "input_file", nargs="?", type=Path, help="Input CSV, JSON, or Excel file."
+    )
+    parser.add_argument(
+        "--models-dir",
+        type=Path,
+        default=Path("./Model"),
+        help="Directory containing weights and preprocessors (default: %(default)s).",
+    )
+    parser.add_argument("--output", type=Path, help="Optional CSV path for results.")
+    return parser
+
+
+def main() -> int:
+    """Run the CLI and return a process status code."""
+    arguments = build_parser().parse_args()
+    input_path = arguments.input_file or Path(
+        input("Enter path to input dataset (.csv, .json, .xlsx): ").strip()
+    )
+
+    try:
+        predictor = ICPowerPredictor(arguments.models_dir)
+        predictions = predictor.predict(load_input_data(input_path))
+    except (
+        FileNotFoundError,
+        OSError,
+        ValueError,
+        RuntimeError,
+        json.JSONDecodeError,
+    ) as error:
+        print(f"Inference failed: {error}")
+        return 1
+
+    print(
+        predictions[
+            [
+                "predicted_total_power_uW",
+                "predicted_dynamic_power_uW",
+                "predicted_leakage_power_uW",
+            ]
+        ].to_string(index=False)
+    )
+    if arguments.output:
+        predictions.to_csv(arguments.output, index=False)
+        print(f"Saved predictions to: {arguments.output}")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

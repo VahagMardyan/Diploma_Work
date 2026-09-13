@@ -7,27 +7,29 @@ import numpy as np
 import pandas as pd
 import torch
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
-from PySide6.QtGui import QPalette, QColor
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
-    QMenu,
     QApplication,
     QFileDialog,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
     QTableView,
     QVBoxLayout,
     QWidget,
-    QHBoxLayout,
 )
 
-from model import PowerNet, engineer_features, get_feature_names, TARGET_CONFIGS
-
-
-def resource_path(relative_path: str) -> Path:
-    return Path(__file__).resolve().parent / relative_path
+from model import (
+    DynamicResNet,
+    LeakageResNet,
+    engineer_domain_features,
+    get_dynamic_features,
+    get_leakage_features,
+)
 
 
 class DataFrameModel(QAbstractTableModel):
@@ -109,15 +111,10 @@ class PredictionWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Digital IC Power Prediction")
+        self.setWindowTitle("Digital IC Power Prediction (PyTorch ResNet)")
         self.setMinimumSize(1100, 720)
         self._dataframe = None
         self._current_file_path = None
-
-        # One cached (model, input_dim) pair per target column, e.g.
-        # {"total_power_uW": (model, input_dim), "dynamic_power_uW": ...}.
-        self._models = {}
-        self._preprocessor = None
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -131,7 +128,7 @@ class PredictionWindow(QMainWindow):
         file_menu.addMenu(export_menu)
 
         self._export_csv_action = export_menu.addAction("CSV (.csv)")
-        self._export_csv_action.triggered.connect(lambda : self._export_results("csv"))
+        self._export_csv_action.triggered.connect(lambda: self._export_results("csv"))
 
         self._export_json_action = export_menu.addAction("JSON (.json)")
         self._export_json_action.triggered.connect(lambda: self._export_results("json"))
@@ -141,7 +138,7 @@ class PredictionWindow(QMainWindow):
 
         self._set_export_actions_enabled(False)
 
-    def _set_export_actions_enabled(self, enabled : bool):
+    def _set_export_actions_enabled(self, enabled: bool):
         self._export_csv_action.setEnabled(enabled)
         self._export_json_action.setEnabled(enabled)
         self._export_xlsx_action.setEnabled(enabled)
@@ -163,9 +160,16 @@ class PredictionWindow(QMainWindow):
             )
             return
 
-        features, _, _ = get_feature_names()
-        input_columns = [col for col in features if col in self._dataframe.columns]
-        export_columns = input_columns + prediction_columns
+        dyn_features, _, _ = get_dynamic_features()
+        leak_features, _, _ = get_leakage_features()
+        all_features = list(set(dyn_features + leak_features))
+        
+        input_columns = [col for col in all_features if col in self._dataframe.columns]
+        proxy_columns = ["c_pin", "c_wire", "c_total_proxy", "phys_dynamic_proxy", "phys_leakage_proxy"]
+        valid_proxies = [c for c in proxy_columns if c in self._dataframe.columns]
+        
+        export_columns = input_columns + valid_proxies + prediction_columns
+        export_columns = list(dict.fromkeys(export_columns))
         export_df = self._dataframe[export_columns]
 
         filters = {
@@ -214,17 +218,16 @@ class PredictionWindow(QMainWindow):
         if len(self._dataframe) == 1:
             row = self._dataframe.iloc[0]
             text = (
-            f"Predicted Dynamic: {row['predicted_dynamic_power_uW']:.4f} µW\n"
-            f"Predicted Leakage: {row['predicted_leakage_power_uW']:.4f} µW\n"
-            f"Predicted Total: {row['predicted_total_power_uW']:.4f} µW"
-        )
+                f"Predicted Dynamic: {row['predicted_dynamic_power_uW']:.4f} µW\n"
+                f"Predicted Leakage: {row['predicted_leakage_power_uW']:.4f} µW\n"
+                f"Predicted Total: {row['predicted_total_power_uW']:.4f} µW"
+            )
         else:
             export_df = self._dataframe[prediction_columns]
             text = export_df.to_csv(sep="\t", index=False)
 
         QApplication.clipboard().setText(text)
         self._status_label.setText("Predicted power values copied to clipboard.")
-
 
     def _build_ui(self):
         central = QWidget()
@@ -242,7 +245,7 @@ class PredictionWindow(QMainWindow):
         title_label = QLabel("Digital IC Power Prediction")
         title_label.setObjectName("titleLabel")
         subtitle_label = QLabel(
-            "Load a JSON, CSV, or XLSX file and predict IC power in µW with a modern desktop interface."
+            "Load a JSON, CSV, or XLSX file and predict IC power in µW using PyTorch ResNets."
         )
         subtitle_label.setObjectName("subtitleLabel")
         subtitle_label.setWordWrap(True)
@@ -300,7 +303,7 @@ class PredictionWindow(QMainWindow):
         self._prediction_table.setAlternatingRowColors(True)
 
         preview_splitter = QSplitter(Qt.Horizontal)
-        preview_splitter.addWidget(self._boxed_widget(f"Input Data Preview:", self._input_table))
+        preview_splitter.addWidget(self._boxed_widget("Input Data Preview:", self._input_table))
         preview_splitter.addWidget(self._boxed_widget("Predicted Power", self._prediction_table))
         preview_splitter.setSizes([650, 350])
 
@@ -481,7 +484,6 @@ class PredictionWindow(QMainWindow):
             return
 
         self._dataframe = predicted_dataframe
-
         self._set_export_actions_enabled(True)
 
         self._status_label.setText(
@@ -510,89 +512,77 @@ class PredictionWindow(QMainWindow):
             "predicted_leakage_power_uW",
             "predicted_total_power_uW",
         ]
-        self._populate_table(self._prediction_table, predicted_dataframe[prediction_columns])
-
-    def _load_model(self, target_column: str, model_path: Path, input_dim: int) -> torch.nn.Module:
-        """
-        Load (and cache) the model for a given target column. Rebuilds only
-        if that target hasn't been loaded yet, or the expected input
-        dimensionality has changed (e.g. a different dataset schema was
-        loaded in the same session).
-        """
-        cached = self._models.get(target_column)
-        if cached is not None and cached[1] == input_dim:
-            return cached[0]
-
-        if cached is not None:
-            old_model, _ = cached
-            del old_model
-            del self._models[target_column]
-            if self._device.type == "cuda":
-                torch.cuda.empty_cache()
-
-        model = PowerNet(input_dim).to(self._device)
-        state_dict = torch.load(model_path, map_location=self._device, weights_only=True)
-        if isinstance(state_dict, torch.nn.Module):
-            model = state_dict.to(self._device)
-        else:
-            model.load_state_dict(state_dict)
-        model.eval()
-
-        self._models[target_column] = (model, input_dim)
-        return model
-
-    def _predict_target(self, target_column: str, model_path: Path, X_tensor: torch.Tensor) -> np.ndarray:
-        model = self._load_model(target_column, model_path, X_tensor.shape[1])
-        with torch.no_grad():
-            preds_log = model(X_tensor).cpu().numpy().flatten()
-        return np.exp(preds_log)
+        
+        proxy_columns = ["c_total_proxy", "phys_dynamic_proxy", "phys_leakage_proxy"]
+        valid_proxies = [c for c in proxy_columns if c in predicted_dataframe.columns]
+        
+        display_columns = prediction_columns + valid_proxies
+        self._populate_table(self._prediction_table, predicted_dataframe[display_columns])
 
     def _run_prediction(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         base_dir = Path(__file__).resolve().parent
-        preprocessor_path = base_dir / "Model" / "preprocessor.joblib"
+        
+        dyn_preprocessor_path = base_dir / "Model" / "preprocessor_dynamic.joblib"
+        leak_preprocessor_path = base_dir / "Model" / "preprocessor_leakage.joblib"
+        dyn_model_path = base_dir / "Model" / "dynamic_power_predictor_model.pth"
+        leak_model_path = base_dir / "Model" / "leakage_power_predictor_model.pth"
 
-        model_paths = {
-            target: base_dir / Path(relative_path)
-            for target, relative_path in TARGET_CONFIGS.items()
-        }
-        missing = [str(p) for p in [preprocessor_path, *model_paths.values()] if not p.exists()]
+        required_files = [dyn_preprocessor_path, leak_preprocessor_path, dyn_model_path, leak_model_path]
+        missing = [str(p) for p in required_files if not p.exists()]
         if missing:
             raise FileNotFoundError(
                 "The following model/preprocessor file(s) are missing: " + ", ".join(missing)
             )
 
-        if self._preprocessor is None:
-            self._preprocessor = joblib.load(preprocessor_path)
-        preprocessor = self._preprocessor
+        df_eng = engineer_domain_features(dataframe)
+        df_eng = df_eng.reset_index(drop=True)
 
-        dataframe = engineer_features(dataframe)
-        features, _, _ = get_feature_names()
-        X_processed = preprocessor.transform(dataframe[features])
+        # 1. Dynamic Power Prediction (PyTorch DynamicResNet)
+        dyn_preprocessor = joblib.load(dyn_preprocessor_path)
+        dyn_features, _, _ = get_dynamic_features()
+        X_dyn = dyn_preprocessor.transform(df_eng[dyn_features]).astype(np.float32)
+        X_dyn_tensor = torch.tensor(X_dyn, dtype=torch.float32, device=self._device)
 
-        X_tensor = torch.tensor(X_processed, dtype=torch.float32, device=self._device)
+        dyn_model = DynamicResNet(X_dyn.shape[1]).to(self._device)
+        dyn_state = torch.load(dyn_model_path, map_location=self._device, weights_only=True)
+        dyn_model.load_state_dict(dyn_state)
+        dyn_model.eval()
 
+        with torch.no_grad():
+            preds_log_dyn = dyn_model(X_dyn_tensor).cpu().numpy().flatten()
+        
+        predicted_dynamic = np.exp(preds_log_dyn)
+
+        # 2. Leakage Power Prediction (PyTorch LeakageResNet)
+        leak_preprocessor = joblib.load(leak_preprocessor_path)
+        leak_features, _, _ = get_leakage_features()
+        X_leak = leak_preprocessor.transform(df_eng[leak_features]).astype(np.float32)
+        X_leak_tensor = torch.tensor(X_leak, dtype=torch.float32, device=self._device)
+
+        leak_model = LeakageResNet(X_leak.shape[1]).to(self._device)
+        leak_state = torch.load(leak_model_path, map_location=self._device, weights_only=True)
+        leak_model.load_state_dict(leak_state)
+        leak_model.eval()
+
+        with torch.no_grad():
+            preds_log_leak = leak_model(X_leak_tensor).cpu().numpy().flatten()
+        
+        predicted_leakage = np.exp(preds_log_leak)
+
+        # Results assembly
         dataframe = dataframe.reset_index(drop=True)
-        for target_column, model_path in model_paths.items():
-            predicted_values = self._predict_target(target_column, model_path, X_tensor)
-
-            if len(predicted_values) != len(dataframe):
-                raise ValueError(
-                    f"Prediction output length for '{target_column}' "
-                    f"({len(predicted_values)}) does not match the number of "
-                    f"input rows ({len(dataframe)}). This usually means "
-                    "engineer_features() dropped or reordered rows."
-                )
-
-            dataframe[f"predicted_{target_column}"] = predicted_values
-
-        # total_power_uW is derived, not modeled: it's exactly
-        # dynamic + leakage in the data, so summing the two predictions
-        # keeps the three reported values internally consistent.
+        
+        proxy_cols = ["c_pin", "c_wire", "c_total_proxy", "phys_dynamic_proxy", "phys_leakage_proxy"]
+        for col in proxy_cols:
+            if col in df_eng.columns:
+                dataframe[col] = df_eng[col]
+                
+        dataframe["predicted_dynamic_power_uW"] = predicted_dynamic
+        dataframe["predicted_leakage_power_uW"] = predicted_leakage
         dataframe["predicted_total_power_uW"] = (
             dataframe["predicted_dynamic_power_uW"] + dataframe["predicted_leakage_power_uW"]
         )
 
-        del X_tensor
         if self._device.type == "cuda":
             torch.cuda.empty_cache()
 

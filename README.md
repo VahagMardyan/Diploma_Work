@@ -1,117 +1,235 @@
-# Early-Stage Total Power Prediction for Digital ICs using Machine Learning & Deep Learning
+# Early-Stage Digital IC Power Prediction
 
-This repository contains the source code and datasets for a Bachelor's Graduation Thesis titled: **"Development of software for predicting power consumption in the early stage of design of digital integrated circuits"**.
+Source code and experimental data for the Bachelor's Thesis **“Development of
+software for predicting power consumption in the early stage of design of
+digital integrated circuits.”** The project estimates circuit power from
+architectural, physical, switching, and process-voltage-temperature (PVT)
+features before expensive sign-off analysis is available.
 
-The project implements an end-to-end machine learning and deep learning pipeline to predict the **total power consumption (in microwatts - uW)** of digital circuits. Predictions are based on early-stage physical, architectural, topological, and environmental parameters across FinFET technology nodes.
+## Methodology
 
-## Key Features
-
-* **Advanced Neural Network Architecture:** Features **PowerNet**, a deep Multi-Layer Perceptron (MLP) built in PyTorch with custom log-scale data preprocessing to handle power consumption ranges spanning multiple orders of magnitude (from $0.1$ uW to over $1000$ uW).
-* **Multi-Model Evaluation:** Compares traditional Linear Regression, tree-based ensembles (XGBoost, Random Forest), and deep neural networks (PyTorch MLP).
-* **Smart Preprocessing & Feature Engineering:** Custom feature engineering (e.g., $V_{\text{dd}}^2 \cdot f$ dynamic scaling factor) and logarithmic feature transformation to capture non-linear physical relationships.
-* **GPU Acceleration & Portability:** Native CUDA support with automatic CPU fallback.
-* **Modular Pipeline Architecture:** Clean separation of model architecture, training routines, and visualization helpers to prevent unnecessary model retraining when running predictions or plotting results.
-
----
-
-## What Power We Predict (Target & Scope)
-
-The model predicts the **Total Power Consumption ($P_{\text{total}}$ in uW)** of the digital integrated circuit at the early design stage, which mathematically represents the sum of both dynamic and static power:
+Total power is represented as the sum of independently learned components:
 
 $$
 P_{\text{total}} = P_{\text{dynamic}} + P_{\text{static}}
 $$
 
-Using architectural properties (cell counts, gate types, area, number of nets), physical parameters (logic depth, fanout), operational features (clock frequency, toggle rate, static probability, supply voltage $V_{\text{dd}}$), and PVT environmental variables (process, temperature), the pipeline acts as a high-speed, early-stage replacement for heavy EDA power estimation tools.
+The production pipeline uses two purpose-built PyTorch residual networks:
 
----
+- `DynamicResNet` estimates switching-dependent dynamic power.
+- `LeakageResNet` estimates static (leakage) power.
+
+Both models operate on log-transformed targets, use the custom `MAPELoss`, and
+share a reproducible preprocessing contract saved alongside their weights.
+Domain feature engineering supplies physical proxies such as capacitance,
+clock-tree load, and voltage/frequency scaling. Training metrics and learning
+rates are recorded exclusively through TensorBoard.
 
 ## Performance Summary
 
-The evaluation results on completely unseen validation/test split configurations (including highly non-linear low-power and high-power zones):
+Evaluation on grouped, unseen circuit designs demonstrates strong generalization
+over a wide power range:
 
-| Model                       | Architecture Details                         |    R² Score    |     Stable MAPE (%)     |          Target Scale Handling          |
-| :-------------------------- | :------------------------------------------- | :-------------: | :----------------------: | :--------------------------------------: |
-| **Linear Regression** | Standard Linear Model                        |      ~0.00      |          >5000%          |       Poor (struggles with range)       |
-| **XGBoost**           | Gradient Boosted Trees                       |      ~0.45      |         ~132.02%         |                 Moderate                 |
-| **Random Forest**     | Tree Ensemble                                |      ~0.95      |          ~3.21%          |                Very Good                |
-| **PowerNet (MLP)**    | **Deep PyTorch MLP (256-128-64-32-1)** | **>0.99** | **~2.10% - 2.50%** | **Excellent (0.1 uW to 1000+ uW)** |
+- $R^2 > 0.94$
+- sMAPE approximately $35\%$
+- Filtered MAPE approximately $20\%$ in active power regions
 
-> **Conclusion:** The PyTorch-based **PowerNet** neural network is selected as the production model due to its exceptional generalization capabilities across different design scales, achieving **near-perfect physical alignment ($R^2 > 0.99$)**.
+The filtered metric excludes near-zero targets, where ordinary percentage errors
+are inherently unstable. These figures should be interpreted together with the
+test split and power-region definition used in the thesis experiments.
 
----
-
-## Repository Structure
+## Repository Layout
 
 ```text
-.
-├── Datasets/                          # Raw and processed CSV power data pairs
-│   ├── dataset_power.csv              # Initial design pairs (Dataset Part 1)
-│   └── dataset_power_alt.csv          # New iteration design pairs (Dataset Part 2)
-├── Model/                             # Saved model binaries & preprocessors (Gitignored)
-│   ├── power_predictor_model.pth      # PyTorch model weights
-│   └── preprocessor.joblib            # Fitted Scikit-Learn ColumnTransformer
-├── Scripts/                           # Core ML pipeline logic
-│   ├── model.py                       # Main PyTorch MLP training, evaluation, and saving script
-│   ├── graph.py                       # Bar chart generator (comparing Real vs Predicted samples)
-│   └── scatter_graph.py               # Scientific Scatter Plot (y = x fit in logarithmic scale)
-├── Verilog/                           # RTL hardware designs used for data collection
-│   ├── Verilog-Designs/               # Categorized RTL source files
-├── environment.yml                    # Conda environment definition file
-└── README.md                          # Project documentation
+Codes/
+├── Datasets/                 Training datasets
+├── Results/
+│   └── plots.py              Evaluation and analytics visualizations
+└── Scripts/
+    ├── model.py              Feature engineering, ResNets, and training pipeline
+    ├── main.py               CLI inference façade (`ICPowerPredictor`)
+    ├── gui.py                PySide6 desktop interface
+    ├── extractor.py          Dataset-row export utility
+    ├── getter.py             Compatibility wrapper for target export
+    └── Model/                Generated weights and fitted preprocessors
+    └── verilog_paths.txt	  RTL Designs paths for easy finding
+Verilog/                      RTL designs used for data collection
+environment.yml               Reproducible Conda environment
 ```
 
----
+## Installation
 
-## Installation & Setup
-
-### Option 1: Using Conda (Recommended)
-
-To recreate the exact isolated environment with PyTorch, Scikit-Learn, CUDA support, and all visual tools:
+Create the supplied Conda environment:
 
 ```bash
 conda env create -f environment.yml
-conda activate <environment_name>
+conda activate diploma_work
 ```
 
-### Option 2: Using Pip
+Alternatively, install the core dependencies with pip:
 
 ```bash
-pip install torch pandas numpy scikit-learn joblib matplotlib
+pip install torch tensorboard pandas numpy scikit-learn joblib openpyxl pyside6
 ```
 
----
+Python 3.9 or newer is required. CUDA is selected automatically when it is
+available; inference and training otherwise run on CPU.
 
-## How to Run
+## Training
 
-### 1. Train and Save the Model
-
-To run the data preprocessing, configure the feature transformer, train the PyTorch MLP (with cosine annealing learning rate scheduler), and save the trained weights:
+Run from `Codes/Scripts` so the relative dataset and artifact paths resolve:
 
 ```bash
-python Scripts/model.py
+python model.py
 ```
 
-### 2. Compare Selected Samples (Bar Chart)
+The training pipeline writes the following compatible artifact pairs to `Model/`:
 
-To quickly visualize the prediction accuracy on selected circuits representing different power scale zones (e.g., low-power vs high-power cells):
+- `dynamic_power_predictor_model.pth` and `preprocessor_dynamic.joblib`
+- `leakage_power_predictor_model.pth` and `preprocessor_leakage.joblib`
+
+To inspect the training history:
 
 ```bash
-python Scripts/graph.py
-
+tensorboard --logdir runs
 ```
 
-### 3. Generate Scientific Validation Plot (Scatter Plot)
+## Inference
 
-To generate a professional logarithmic $y=x$ scatter plot showing prediction consistency over the entire validation dataset:
+`main.py` presents an `ICPowerPredictor` façade: it validates artifacts, applies
+the matching preprocessor, invokes both ResNets, and assembles dynamic, leakage,
+and total-power predictions. The command-line layer only reads inputs and
+displays or saves results.
 
 ```bash
-python Scripts/scatter_graph.py
-
+cd Codes/Scripts
+python main.py Test/testing.json --output Test/predictions.csv
 ```
 
----
+CSV, JSON, XLS, and XLSX input files are accepted. A JSON object represents one
+design; a JSON array represents multiple designs. The input must provide the raw
+features used by the training pipeline.
 
-## License & Usage
+## GUI and Analytics
 
-This is a private repository developed as part of a Bachelor's Diploma Work Project at the **National Polytechnic University of Armenia** in collaboration with **Synopsys Armenia**. All rights reserved.
+Launch the PySide6 application from `Codes/Scripts`:
+
+```bash
+python gui.py
+```
+
+For evaluation figures and reports, use `Codes/Results/plots.py`. It loads the
+same saved PyTorch artifacts as the CLI, ensuring analytical comparisons remain
+consistent with deployed inference.
+
+## Dataset Row Utilities
+
+`extractor.py` exports one row from a collected CSV dataset into a compact file
+that can be passed directly to the inference CLI or used as a measured-power
+reference. Run these commands from `Codes/Scripts`, where `extractor.py`,
+`getter.py`, and `main.py` are located. Row indices are zero-based, so `--row 0`
+selects the first data row (not the CSV header).
+
+### `extractor.py`
+
+```bash
+python extractor.py SOURCE_CSV OUTPUT_FILE --row ROW_INDEX [--selection SELECTION]
+```
+
+The source must be a CSV file with every column required by the selected
+export. The destination extension chooses its format: `.json`, `.csv`, or
+`.xlsx`. Parent directories for the destination are created automatically.
+
+`--selection` controls the exported column set:
+
+- `features` (default) exports the 34 raw model features required by `main.py`,
+  including PVT, cell-count, timing, topology, and switching features.
+- `targets` exports the measured `dynamic_power_uW`, `leakage_power_uW`, and
+  `total_power_uW` columns.
+- `all` exports the model features and all three measured power targets.
+
+Export an inference-ready JSON record from the first encoder test sample:
+
+```bash
+cd Codes/Scripts
+python extractor.py ../../Verilog/Test/encoder/dataset_power_test_encoder.csv \
+    Test/testing.json --row 0 --selection features
+```
+
+Export the same row as a one-row CSV containing both inputs and its measured
+power values:
+
+```bash
+python extractor.py ../../Verilog/Test/encoder/dataset_power_test_encoder.csv \
+    Test/encoder-row-0.csv --row 0 --selection all
+```
+
+Export only the measured targets to an Excel workbook:
+
+```bash
+python extractor.py ../../Verilog/Test/encoder/dataset_power_test_encoder.csv \
+    Test/encoder-row-0-targets.xlsx --row 0 --selection targets
+```
+
+The command reports an error when the dataset file is absent, the row is outside
+the available range, a required feature or target column is missing, or the
+output extension is not `.json`, `.csv`, or `.xlsx`.
+
+### `getter.py` compatibility command
+
+`getter.py` is a backward-compatible wrapper around `extractor.py`. It accepts
+the same positional arguments and `--row` option, but adds `--selection targets`
+when no selection is supplied. This is useful when the historical workflow only
+needs the measured values:
+
+```bash
+python getter.py ../../Verilog/Test/encoder/dataset_power_test_encoder.csv \
+    Test/encoder-row-0-targets.json --row 0
+```
+
+You may explicitly override its default selection when needed:
+
+```bash
+python getter.py ../../Verilog/Test/encoder/dataset_power_test_encoder.csv \
+    Test/encoder-row-0-features.json --row 0 --selection features
+```
+
+### End-to-end: inspect one dataset sample with the predictor
+
+The following workflow preserves a clear separation between model inputs and
+measured values, allowing a prediction to be compared with the corresponding
+dataset target without accidentally supplying target columns as inputs.
+
+1. Export the selected row's features for inference.
+
+   ```bash
+   python extractor.py ../../Verilog/Test/encoder/dataset_power_test_encoder.csv \
+       Test/encoder-row-0-input.json --row 0 --selection features
+   ```
+2. Export the same row's measured targets with `getter.py` (or use
+   `extractor.py --selection targets`).
+
+   ```bash
+   python getter.py ../../Verilog/Test/encoder/dataset_power_test_encoder.csv \
+       Test/encoder-row-0-measured.json --row 0
+   ```
+3. Run inference with the feature-only JSON file and save the model result.
+
+   ```bash
+   python main.py Test/encoder-row-0-input.json \
+       --output Test/encoder-row-0-prediction.csv
+   ```
+4. Open `Test/encoder-row-0-measured.json` alongside
+   `Test/encoder-row-0-prediction.csv` to compare dynamic, leakage, and total
+   power. Both represent the same zero-based source row; the former contains
+   measured values in microwatts and the latter contains the model estimates.
+
+For a single audit artifact rather than a feature-only inference input, export
+with `--selection all`; retain that file for traceability and use the
+feature-only export for `main.py`.
+
+## License
+
+This repository is a private Bachelor's Diploma Work project developed at the
+National Polytechnic University of Armenia in collaboration with Synopsys
+Armenia. All rights reserved.

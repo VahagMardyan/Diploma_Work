@@ -1,30 +1,48 @@
-import pandas as pd
-import json
+"""Backward-compatible measured-power export command.
 
-user_input_index = int(input("Index: ")) # real csv index - 2
+Use ``extractor.py`` for the complete row-export interface. This wrapper retains
+the historical utility name while delegating all work to the shared implementation.
+"""
 
-# include_alt = True if input("Alt? (Press any key if yes otherwise press Enter): ") else False
+from __future__ import annotations
 
-# CSV_PATH = f"../../Verilog/Test/dataset_power_test{'_alt' if include_alt else ''}.csv"
-# CSV_PATH = f"../../Verilog/Test/decoder/dataset_power_test_decoder.csv"
-CSV_PATH = f"../../Verilog/Test/encoder/dataset_power_test_encoder.csv"
+import sys
+from collections.abc import Sequence
+from typing import Optional
 
-df = pd.read_csv(CSV_PATH)
+from extractor import main as export_main
 
-if user_input_index < 2 or user_input_index > len(df) + 1:
-    raise ValueError(f"Index should be between 2 and {len(df) + 1}")
 
-row_data = df.iloc[user_input_index - 2]
+def print_getter_usage() -> None:
+    """Print usage example for the quick target exporter."""
+    print("""
+================================================================================
+ GETTER UTILITY USAGE EXAMPLES (Quick Target Exporter)
+================================================================================
+Usage:
+  python getter.py <source_csv> <output_file> --row <index>
 
-required_features = [
-    'dynamic_power_uW', 'leakage_power_uW', 'total_power_uW'
-]
+Example:
+  Extract measured target values (Dynamic, Leakage, Total Power) for row 0:
+    python getter.py ../Datasets/dataset_power.csv Test/real_power.json --row 0
+================================================================================
+""")
 
-subset = row_data[required_features]
 
-file_path = './Test/real_power.json'
+def main(arguments: Optional[Sequence[str]] = None) -> int:
+    """Export measured targets by forwarding to :mod:`extractor`."""
+    provided_arguments = list(sys.argv[1:] if arguments is None else arguments)
 
-with open(file_path, 'w', encoding='utf-8') as f:
-    json.dump(subset.to_dict(), f, indent=4)
+    # Display clean usage text if run without arguments or with -h/--help
+    if not provided_arguments or provided_arguments[0] in ("-h", "--help"):
+        print_getter_usage()
+        return 0
 
-print(f"{user_input_index}-th row (from '{CSV_PATH}' ) saved successfully to {file_path}.")
+    if "--selection" not in provided_arguments:
+        provided_arguments.extend(["--selection", "targets"])
+
+    return export_main(provided_arguments)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
