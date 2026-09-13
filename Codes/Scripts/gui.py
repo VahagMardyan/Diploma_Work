@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import traceback
 from pathlib import Path
 
@@ -137,6 +139,18 @@ class PredictionWindow(QMainWindow):
         self._export_xlsx_action.triggered.connect(lambda: self._export_results("xlsx"))
 
         self._set_export_actions_enabled(False)
+
+        tools_menu = menu_bar.addMenu("&Tools")
+        data_exporter_action = tools_menu.addAction("Launch Data Exporter")
+        data_exporter_action.triggered.connect(self._launch_data_exporter)
+
+    def _launch_data_exporter(self):
+        """Open the companion GUI without blocking the prediction window."""
+        exporter_path = Path(__file__).with_name("extractor_gui.py")
+        try:
+            subprocess.Popen([sys.executable, str(exporter_path)], cwd=str(exporter_path.parent))
+        except OSError as exc:
+            self._status_label.setText(f"Could not launch Data Exporter: {exc}")
 
     def _set_export_actions_enabled(self, enabled: bool):
         self._export_csv_action.setEnabled(enabled)

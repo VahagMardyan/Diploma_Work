@@ -50,6 +50,7 @@ Codes/
     ├── main.py               CLI inference façade (`ICPowerPredictor`)
     ├── gui.py                PySide6 desktop interface
     ├── extractor.py          Dataset-row export utility
+    ├── extractor_gui.py      PySide6 data-export interface
     ├── getter.py             Compatibility wrapper for target export
     └── Model/                Generated weights and fitted preprocessors
     └── verilog_paths.txt	  RTL Designs paths for easy finding
@@ -123,6 +124,29 @@ same saved PyTorch artifacts as the CLI, ensuring analytical comparisons remain
 consistent with deployed inference.
 
 ## Dataset Row Utilities
+
+### Data Exporter GUI
+
+`extractor_gui.py` provides a visual interface for the `extractor.py` and
+`getter.py` workflows. Launch it from `Codes/Scripts`:
+
+```bash
+python extractor_gui.py
+```
+
+Select a source `.csv` dataset, then choose one zero-based **Row index** or an
+inclusive **Start Row** to **End Row** range. Once the source is loaded, the
+window displays its valid row range. The standard exporter block uses the
+selected `features` (default), `targets`, or `all data` mode; the **Quick Get
+Targets** block always exports the measured target columns, matching
+`getter.py`.
+
+Both blocks write `.json`, `.csv`, or `.xlsx` files. A one-row JSON export is a
+single object, while a range JSON export is an array of objects. Source-file,
+row-index, range, and output-extension errors are shown directly in the status
+bar. The prediction GUI's **Tools → Launch Data Exporter** action opens this
+window; the exporter's **Tools → Launch Power Prediction GUI** action provides
+the return path.
 
 `extractor.py` exports one row from a collected CSV dataset into a compact file
 that can be passed directly to the inference CLI or used as a measured-power
@@ -228,8 +252,3 @@ For a single audit artifact rather than a feature-only inference input, export
 with `--selection all`; retain that file for traceability and use the
 feature-only export for `main.py`.
 
-## License
-
-This repository is a private Bachelor's Diploma Work project developed at the
-National Polytechnic University of Armenia in collaboration with Synopsys
-Armenia. All rights reserved.

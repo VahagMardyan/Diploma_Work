@@ -76,23 +76,48 @@ def export_row(
         row_index: Zero-based index of the row to export.
         selection: ``features``, ``targets``, or ``all``.
     """
+    export_rows(source, output, row_index, row_index, selection)
+
+
+def export_rows(
+    source: Path,
+    output: Path,
+    start_row: int,
+    end_row: int,
+    selection: str,
+) -> None:
+    """Export an inclusive zero-based range of CSV rows.
+
+    This is the shared API for graphical callers. ``export_row`` remains the
+    public single-record API and command-line interface used by existing tools.
+    """
     if not source.is_file():
         raise FileNotFoundError(f"Source dataset not found: {source}")
-    dataframe = pd.read_csv(source)
-    if not 0 <= row_index < len(dataframe):
-        raise IndexError(f"Row index must be between 0 and {len(dataframe) - 1}.")
+    if source.suffix.lower() != ".csv":
+        raise ValueError("Source dataset must be a CSV file.")
+    if selection not in {"features", "targets", "all"}:
+        raise ValueError("Selection must be features, targets, or all.")
 
-    record = dataframe.loc[
-        dataframe.index[row_index], select_columns(dataframe, selection)
-    ]
+    dataframe = pd.read_csv(source)
+    if dataframe.empty:
+        raise ValueError("Source dataset contains no data rows.")
+    if start_row > end_row:
+        raise ValueError("Start row cannot be greater than end row.")
+    if start_row < 0 or end_row >= len(dataframe):
+        raise IndexError(f"Row indices must be between 0 and {len(dataframe) - 1}.")
+
+    records = dataframe.iloc[start_row : end_row + 1][select_columns(dataframe, selection)]
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.suffix.lower() == ".json":
         with output.open("w", encoding="utf-8") as output_file:
-            json.dump(record.to_dict(), output_file, indent=2)
+            if len(records) == 1:
+                json.dump(records.iloc[0].to_dict(), output_file, indent=2)
+            else:
+                json.dump(records.to_dict(orient="records"), output_file, indent=2)
     elif output.suffix.lower() == ".csv":
-        record.to_frame().T.to_csv(output, index=False)
+        records.to_csv(output, index=False)
     elif output.suffix.lower() == ".xlsx":
-        record.to_frame().T.to_excel(output, index=False)
+        records.to_excel(output, index=False)
     else:
         raise ValueError("Output format must be JSON, CSV, or XLSX.")
 
