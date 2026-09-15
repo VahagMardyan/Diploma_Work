@@ -46,14 +46,15 @@ Codes/
 ├── Results/
 │   └── plots.py              Evaluation and analytics visualizations
 └── Scripts/
-    ├── model.py              Feature engineering, ResNets, and training pipeline
-    ├── main.py               CLI inference façade (`ICPowerPredictor`)
-    ├── gui.py                PySide6 desktop interface
-    ├── extractor.py          Dataset-row export utility
-    ├── extractor_gui.py      PySide6 data-export interface
-    ├── getter.py             Compatibility wrapper for target export
-    └── Model/                Generated weights and fitted preprocessors
-    └── verilog_paths.txt	  RTL Designs paths for easy finding
+│    ├── model.py              Feature engineering, ResNets, and training pipeline
+│    ├── main.py               CLI inference façade (`ICPowerPredictor`)
+│    ├── gui.py                PySide6 desktop interface
+│    ├── extractor.py          Dataset-row export utility
+│    ├── extractor_gui.py      PySide6 data-export interface
+│    ├── getter.py             Compatibility wrapper for target export
+│    └── Model/                Generated weights and fitted preprocessors
+│    └── verilog_paths.txt	  RTL Designs paths for easy finding
+└── Validation_Results.py	  5-Fold Cross Validation and SHAP results
 Verilog/                      RTL designs used for data collection
 environment.yml               Reproducible Conda environment
 ```
@@ -144,9 +145,11 @@ Targets** block always exports the measured target columns, matching
 Both blocks write `.json`, `.csv`, or `.xlsx` files. A one-row JSON export is a
 single object, while a range JSON export is an array of objects. Source-file,
 row-index, range, and output-extension errors are shown directly in the status
-bar. The prediction GUI's **Tools → Launch Data Exporter** action opens this
-window; the exporter's **Tools → Launch Power Prediction GUI** action provides
-the return path.
+bar. The bottom **Features Preview** and **Targets Preview** tables show the
+selected row or inclusive range; before a complete selection is entered, they
+show the first five dataset rows. The prediction GUI's **Tools → Launch Data
+Exporter** action opens this window; the exporter's **Tools → Launch Power
+Prediction GUI** action provides the return path.
 
 `extractor.py` exports one row from a collected CSV dataset into a compact file
 that can be passed directly to the inference CLI or used as a measured-power
@@ -251,4 +254,3 @@ dataset target without accidentally supplying target columns as inputs.
 For a single audit artifact rather than a feature-only inference input, export
 with `--selection all`; retain that file for traceability and use the
 feature-only export for `main.py`.
-

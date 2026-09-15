@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 
 import pandas as pd
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,12 +23,45 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
     QStatusBar,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
 
-from extractor import export_rows
+from extractor import MODEL_FEATURES, POWER_TARGETS, export_rows
+
+
+class DataFramePreviewModel(QAbstractTableModel):
+    """Read-only dataframe model used by the compact dataset previews."""
+
+    def __init__(self, dataframe: pd.DataFrame) -> None:
+        super().__init__()
+        self._dataframe = dataframe.reset_index(drop=True)
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self._dataframe)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self._dataframe.columns)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        if role == Qt.TextAlignmentRole:
+            return Qt.AlignCenter | Qt.AlignVCenter
+        if role != Qt.DisplayRole:
+            return None
+        value = self._dataframe.iat[index.row(), index.column()]
+        if pd.isna(value):
+            return ""
+        return f"{value:.6g}" if isinstance(value, float) else str(value)
+
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):
+        if role != Qt.DisplayRole:
+            return None
+        return str(self._dataframe.columns[section]) if orientation == Qt.Horizontal else str(section)
 
 
 class ExtractorWindow(QMainWindow):
@@ -39,8 +72,9 @@ class ExtractorWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Digital IC Data Exporter")
-        self.setMinimumSize(820, 650)
+        self.setMinimumSize(820, 800)
         self._row_count: int | None = None
+        self._dataframe: pd.DataFrame | None = None
         self._build_ui()
         self._apply_style()
 
@@ -59,7 +93,7 @@ class ExtractorWindow(QMainWindow):
         layout.addWidget(subtitle)
 
         selection_box = QGroupBox("Export Selection")
-        selection_layout = QHBoxLayout(selection_box)
+        selection_layout = QVBoxLayout(selection_box)
         self._selection_group = QButtonGroup(self)
         self._feature_radio = QRadioButton("Features")
         self._target_radio = QRadioButton("Targets")
@@ -70,18 +104,33 @@ class ExtractorWindow(QMainWindow):
             selection_layout.addWidget(button)
         self._feature_radio.setChecked(True)
         selection_layout.addStretch()
-        layout.addWidget(selection_box)
 
         source_box = QGroupBox("Source Dataset and Rows")
-        source_layout = QGridLayout(source_box)
+        source_layout = QVBoxLayout(source_box)
+        source_layout.setContentsMargins(12, 16, 12, 14)
+        source_layout.setSpacing(10)
+        label_width = 140
+
         self._source_input = QLineEdit()
         self._source_input.setPlaceholderText("Select a source .csv dataset")
+        self._source_input.setMinimumHeight(25)
+        self._source_input.editingFinished.connect(self._inspect_entered_source)
         source_browse = QPushButton("Browse CSV")
         source_browse.setObjectName("browseButton")
+        source_browse.setObjectName("BrowseButton")
+        source_browse.setMinimumHeight(25)
+        source_browse.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         source_browse.clicked.connect(self._browse_source)
-        source_layout.addWidget(QLabel("Input file:"), 0, 0)
-        source_layout.addWidget(self._source_input, 0, 1)
-        source_layout.addWidget(source_browse, 0, 2)
+        file_label = QLabel("Input file:")
+        file_label.setMinimumWidth(label_width)
+        file_label.setObjectName("inputLabel")
+        file_row = QHBoxLayout()
+        file_row.setContentsMargins(0, 0, 0, 0)
+        file_row.setSpacing(15)
+        file_row.addWidget(file_label)
+        file_row.addWidget(self._source_input, 1)
+        file_row.addWidget(source_browse)
+        source_layout.addLayout(file_row)
 
         self._row_index_input = QLineEdit()
         self._row_index_input.setPlaceholderText("e.g. 0")
@@ -89,24 +138,60 @@ class ExtractorWindow(QMainWindow):
         self._start_row_input.setPlaceholderText("e.g. 0")
         self._end_row_input = QLineEdit()
         self._end_row_input.setPlaceholderText("e.g. 9")
-        source_layout.addWidget(QLabel("Row index:"), 1, 0)
-        source_layout.addWidget(self._row_index_input, 1, 1, 1, 2)
-        source_layout.addWidget(QLabel("Or inclusive range:"), 2, 0)
-        range_layout = QHBoxLayout()
-        range_layout.setContentsMargins(0, 0, 0, 0)
-        range_layout.addWidget(self._start_row_input)
-        range_layout.addWidget(QLabel("to"))
-        range_layout.addWidget(self._end_row_input)
-        source_layout.addLayout(range_layout, 2, 1, 1, 2)
+        for field in (self._row_index_input, self._start_row_input, self._end_row_input):
+            field.setMinimumHeight(25)
+            field.setMaximumWidth(140)
+            field.textChanged.connect(self._update_previews)
+
+        index_label = QLabel("Row index:")
+        index_label.setMinimumWidth(label_width)
+        index_label.setObjectName('inputLabel')
+        index_row = QHBoxLayout()
+        index_row.setContentsMargins(0, 0, 0, 0)
+        index_row.setSpacing(15)
+        index_row.addWidget(index_label)
+        index_row.addWidget(self._row_index_input, 1)
+        index_row.addStretch()
+        source_layout.addLayout(index_row)
+
+        range_label = QLabel("Or inclusive range:")
+        range_label.setMinimumWidth(label_width)
+        range_label.setObjectName('inputLabel')
+        range_row = QHBoxLayout()
+        range_row.setContentsMargins(0, 0, 0, 0)
+        range_row.setSpacing(15)
+        range_row.addWidget(range_label)
+        range_row.addWidget(self._start_row_input, 1)
+        range_row.addWidget(QLabel("to"))
+        range_row.addWidget(self._end_row_input, 1)
+        range_row.addStretch()
+        source_layout.addLayout(range_row)
+
         self._range_info = QLabel("Choose a CSV file to see the valid row range.")
         self._range_info.setObjectName("rangeInfo")
-        source_layout.addWidget(self._range_info, 3, 1, 1, 2)
-        layout.addWidget(source_box)
+        self._range_info.setWordWrap(True)
+        info_row = QHBoxLayout()
+        info_row.setContentsMargins(0, 0, 0, 0)
+        info_row.addSpacing(label_width + 8)
+        info_row.addWidget(self._range_info, 1)
+        source_layout.addLayout(info_row)
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(16)
+        top_layout.addWidget(source_box, 3)
+        top_layout.addWidget(selection_box, 1)
+        layout.addLayout(top_layout)
 
         actions_layout = QHBoxLayout()
         actions_layout.addWidget(self._make_export_box("Extract Features / Data", "extract"))
         actions_layout.addWidget(self._make_export_box("Quick Get Targets", "targets"))
         layout.addLayout(actions_layout)
+
+        preview_layout = QHBoxLayout()
+        self._features_preview = self._make_preview_table()
+        self._targets_preview = self._make_preview_table()
+        preview_layout.addWidget(self._make_preview_box("Features Preview", self._features_preview))
+        preview_layout.addWidget(self._make_preview_box("Targets Preview", self._targets_preview))
+        layout.addLayout(preview_layout)
         layout.addStretch()
 
         self._status = QStatusBar()
@@ -148,24 +233,88 @@ class ExtractorWindow(QMainWindow):
         self._source_input.setText(path)
         self._inspect_source(Path(path))
 
+    def _inspect_entered_source(self) -> None:
+        source_text = self._source_input.text().strip()
+        if source_text:
+            self._inspect_source(Path(source_text))
+
     def _inspect_source(self, source: Path) -> None:
         if source.suffix.lower() != ".csv":
             self._row_count = None
+            self._dataframe = None
+            self._clear_previews()
             self._range_info.setText("Invalid source: only .csv files are supported.")
             self._show_status("Error: source dataset must have a .csv extension.", error=True)
             return
         try:
-            row_count = len(pd.read_csv(source))
+            dataframe = pd.read_csv(source)
+            row_count = len(dataframe)
             if not row_count:
                 raise ValueError("The selected CSV has no data rows.")
         except Exception as exc:
             self._row_count = None
+            self._dataframe = None
+            self._clear_previews()
             self._range_info.setText("Unable to read dataset.")
             self._show_status(f"Error reading dataset: {exc}", error=True)
             return
         self._row_count = row_count
+        self._dataframe = dataframe
         self._range_info.setText(f"Valid dataset row range: 0 to {row_count - 1}")
         self._show_status(f"Loaded {source.name}: {row_count} data row(s).")
+        self._update_previews()
+
+    def _make_preview_table(self) -> QTableView:
+        table = QTableView()
+        table.setObjectName("previewTable")
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QTableView.NoEditTriggers)
+        table.setSelectionBehavior(QTableView.SelectRows)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setVisible(False)
+        table.setMinimumHeight(150)
+        return table
+
+    def _make_preview_box(self, title: str, table: QTableView) -> QGroupBox:
+        box = QGroupBox(title)
+        box.setObjectName("previewBox")
+        box_layout = QVBoxLayout(box)
+        box_layout.addWidget(table)
+        return box
+
+    def _update_previews(self) -> None:
+        if self._dataframe is None:
+            self._clear_previews()
+            return
+        try:
+            start_row, end_row = self._selected_rows()
+            if start_row < 0 or end_row < start_row or end_row >= len(self._dataframe):
+                raise ValueError
+            preview_rows = self._dataframe.iloc[start_row : end_row + 1]
+        except (TypeError, ValueError):
+            # Before a complete valid selection is entered, show a helpful sample.
+            preview_rows = self._dataframe.iloc[: min(5, len(self._dataframe))]
+
+        self._set_preview_model(self._features_preview, preview_rows, MODEL_FEATURES)
+        self._set_preview_model(self._targets_preview, preview_rows, POWER_TARGETS)
+
+    def _set_preview_model(self, table: QTableView, dataframe: pd.DataFrame, columns: list[str]) -> None:
+        available_columns = [column for column in columns if column in dataframe.columns]
+        preview = dataframe[available_columns] if available_columns else pd.DataFrame()
+        old_model = table.model()
+        table.setModel(DataFramePreviewModel(preview))
+        if old_model is not None:
+            old_model.deleteLater()
+        table.resizeColumnsToContents()
+
+    def _clear_previews(self) -> None:
+        for table in getattr(self, "_features_preview", None), getattr(self, "_targets_preview", None):
+            if table is None:
+                continue
+            old_model = table.model()
+            table.setModel(None)
+            if old_model is not None:
+                old_model.deleteLater()
 
     def _browse_output(self, output : QLineEdit, default_name : str = "export.json") -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -246,18 +395,26 @@ class ExtractorWindow(QMainWindow):
             QMainWindow { background: #121212; }
             QLabel#titleLabel { font-size: 26px; font-weight: 700; color: #FFFFFF; }
             QLabel#subtitleLabel, QLabel#rangeInfo { color: #CCCCCC; font-size: 14px; }
+            QLabel#rangeInfo { font-size: 12px; }
+            QLabel#inputLabel { font-size: 14px; padding: 5px; }
+            QPushButton#BrowseButton { font-size: 11px; padding: 8px; }
             QGroupBox { background: #191919; border: 1px solid #2E2E2E; border-radius: 12px; margin-top: 12px; padding: 12px; font-weight: 700; color: #FFFFFF; }
-            QGroupBox::title { subcontrol-origin: padding; left: 12px; padding: 0 5px; }
-            QLineEdit { background: #141414; border: 1px solid #3A3A3A; border-radius: 8px; color: #EEEEEE; padding: 9px; }
+            QGroupBox::title { subcontrol-origin: padding; left: 12px; padding: 0 5px; background: #191919; }
+            QLineEdit { background: #141414; border: 1px solid #3A3A3A; border-radius: 8px; color: #EEEEEE; padding: 5px 5px; font-size: 12px; }
             QLineEdit:focus { border-color: #3A8DFF; }
             QRadioButton { color: #DDDDDD; padding: 5px 12px; }
             QRadioButton::indicator { width: 15px; height: 15px; }
-            QPushButton { border: none; border-radius: 10px; padding: 10px 16px; font-size: 14px; background: #2F80ED; color: #FFFFFF; }
+            QPushButton { border: none; border-radius: 10px; padding: 8px 16px; font-size: 14px; background: #2F80ED; color: #FFFFFF; }
             QPushButton:hover { background: #4A90FF; }
             QPushButton#extractButton { background: #12B886; }
             QPushButton#extractButton:hover { background: #1CD88C; }
             QPushButton#targetsButton { background: #7C5CE0; }
             QPushButton#targetsButton:hover { background: #9374F0; }
+            QGroupBox#previewBox { padding: 6px; }
+            QTableView#previewTable { background: #141414; border: 1px solid #2E2E2E; gridline-color: #2E2E2E; color: #EEEEEE; }
+            QHeaderView::section { background: #1F1F1F; color: #EEEEEE; padding: 6px; border: none; }
+            QTableView::item { padding: 6px; }
+            QTableView::item:selected { background: #3A6ED8; color: #FFFFFF; }
             QStatusBar { background: #191919; color: #DDDDDD; border-top: 1px solid #2E2E2E; padding: 5px; }
             QStatusBar[error="true"] { color: #FF7B7B; }
         """)

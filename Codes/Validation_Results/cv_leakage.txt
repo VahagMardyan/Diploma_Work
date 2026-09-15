@@ -1,0 +1,49 @@
+============================================================
+STARTING 5-FOLD GROUPED CROSS-VALIDATION (LEAKAGE POWER)
+============================================================
+  Fold 1 | Epoch 1/60 finished
+  Fold 1 | Epoch 10/60 finished
+  Fold 1 | Epoch 20/60 finished
+  Fold 1 | Epoch 30/60 finished
+  Fold 1 | Epoch 40/60 finished
+  Fold 1 | Epoch 50/60 finished
+  Fold 1 | Epoch 60/60 finished
+Fold 1/5 -> MAE: 1.077521 uW | R2: 0.9719 | Active MAPE (>0.005uW): 13.80%
+  Fold 2 | Epoch 1/60 finished
+  Fold 2 | Epoch 10/60 finished
+  Fold 2 | Epoch 20/60 finished
+  Fold 2 | Epoch 30/60 finished
+  Fold 2 | Epoch 40/60 finished
+  Fold 2 | Epoch 50/60 finished
+  Fold 2 | Epoch 60/60 finished
+Fold 2/5 -> MAE: 0.213398 uW | R2: 0.9938 | Active MAPE (>0.005uW): 7.30%
+  Fold 3 | Epoch 1/60 finished
+  Fold 3 | Epoch 10/60 finished
+  Fold 3 | Epoch 20/60 finished
+  Fold 3 | Epoch 30/60 finished
+  Fold 3 | Epoch 40/60 finished
+  Fold 3 | Epoch 50/60 finished
+  Fold 3 | Epoch 60/60 finished
+Fold 3/5 -> MAE: 0.079176 uW | R2: 0.9917 | Active MAPE (>0.005uW): 10.40%
+  Fold 4 | Epoch 1/60 finished
+  Fold 4 | Epoch 10/60 finished
+  Fold 4 | Epoch 20/60 finished
+  Fold 4 | Epoch 30/60 finished
+  Fold 4 | Epoch 40/60 finished
+  Fold 4 | Epoch 50/60 finished
+  Fold 4 | Epoch 60/60 finished
+Fold 4/5 -> MAE: 0.317258 uW | R2: 0.9951 | Active MAPE (>0.005uW): 10.34%
+  Fold 5 | Epoch 1/60 finished
+  Fold 5 | Epoch 10/60 finished
+  Fold 5 | Epoch 20/60 finished
+  Fold 5 | Epoch 30/60 finished
+  Fold 5 | Epoch 40/60 finished
+  Fold 5 | Epoch 50/60 finished
+  Fold 5 | Epoch 60/60 finished
+Fold 5/5 -> MAE: 0.088588 uW | R2: 0.9960 | Active MAPE (>0.005uW): 7.75%
+
+============================================================
+LEAKAGE 5-FOLD CV SUMMARY RESULTS
+============================================================
+Mean R2 Score: 0.9897 (+/- 0.0090)
+Mean Active MAPE: 9.92%

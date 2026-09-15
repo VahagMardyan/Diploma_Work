@@ -1,0 +1,49 @@
+============================================================
+STARTING 5-FOLD GROUPED CROSS-VALIDATION (DYNAMIC POWER)
+============================================================
+  Fold 1 | Epoch 1/60 finished
+  Fold 1 | Epoch 10/60 finished
+  Fold 1 | Epoch 20/60 finished
+  Fold 1 | Epoch 30/60 finished
+  Fold 1 | Epoch 40/60 finished
+  Fold 1 | Epoch 50/60 finished
+  Fold 1 | Epoch 60/60 finished
+Fold 1/5 -> MAE: 16.9314 uW | R2: 0.7520 | MAPE(>0.1uW): 33.80%
+  Fold 2 | Epoch 1/60 finished
+  Fold 2 | Epoch 10/60 finished
+  Fold 2 | Epoch 20/60 finished
+  Fold 2 | Epoch 30/60 finished
+  Fold 2 | Epoch 40/60 finished
+  Fold 2 | Epoch 50/60 finished
+  Fold 2 | Epoch 60/60 finished
+Fold 2/5 -> MAE: 4.6607 uW | R2: 0.9594 | MAPE(>0.1uW): 17.81%
+  Fold 3 | Epoch 1/60 finished
+  Fold 3 | Epoch 10/60 finished
+  Fold 3 | Epoch 20/60 finished
+  Fold 3 | Epoch 30/60 finished
+  Fold 3 | Epoch 40/60 finished
+  Fold 3 | Epoch 50/60 finished
+  Fold 3 | Epoch 60/60 finished
+Fold 3/5 -> MAE: 6.6683 uW | R2: 0.9600 | MAPE(>0.1uW): 26.65%
+  Fold 4 | Epoch 1/60 finished
+  Fold 4 | Epoch 10/60 finished
+  Fold 4 | Epoch 20/60 finished
+  Fold 4 | Epoch 30/60 finished
+  Fold 4 | Epoch 40/60 finished
+  Fold 4 | Epoch 50/60 finished
+  Fold 4 | Epoch 60/60 finished
+Fold 4/5 -> MAE: 5.8200 uW | R2: 0.9268 | MAPE(>0.1uW): 18.96%
+  Fold 5 | Epoch 1/60 finished
+  Fold 5 | Epoch 10/60 finished
+  Fold 5 | Epoch 20/60 finished
+  Fold 5 | Epoch 30/60 finished
+  Fold 5 | Epoch 40/60 finished
+  Fold 5 | Epoch 50/60 finished
+  Fold 5 | Epoch 60/60 finished
+Fold 5/5 -> MAE: 2.9670 uW | R2: 0.9935 | MAPE(>0.1uW): 12.16%
+
+============================================================
+5-FOLD CV SUMMARY RESULTS
+============================================================
+Mean R2 Score: 0.9183 (+/- 0.0858)
+Mean Active MAPE (>0.1uW): 21.88%
