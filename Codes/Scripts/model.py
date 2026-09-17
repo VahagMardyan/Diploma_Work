@@ -121,9 +121,7 @@ def get_leakage_features():
 
 def load_data():
     print("Loading datasets...")
-    df1 = pd.read_csv("../Datasets/dataset_power.csv")
-    df2 = pd.read_csv("../Datasets/dataset_power_alt.csv")
-    df = pd.concat([df1, df2], ignore_index=True)
+    df = pd.read_csv("../Datasets/dataset.csv")
     df = df[df["cell_count"] > 0].copy()
     return df.reset_index(drop=True)
 
